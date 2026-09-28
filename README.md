@@ -7,7 +7,10 @@ Bridges and Handstand Pushups, ten progressively harder steps each), and
 counts both in hard sets for six muscle groups: chest, back, shoulders, arms,
 abs and legs.
 
-**Live app:** https://michele-minervini.github.io/calisthenics-tracker/
+**Live app:** https://michele-minervini.github.io/milo/
+
+(It used to live at `…/calisthenics-tracker/`; see
+[Moving from the old address](#moving-from-the-old-address).)
 
 ## What it does
 
@@ -76,8 +79,9 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   (progress + history) to move between devices.
 - **Optional cloud sync.** Turn it on once and your phone and laptop keep each
   other up to date by themselves — see [Cloud sync setup](#cloud-sync-setup).
-- Works offline and can be installed on the iPhone home screen
-  (Safari → Share → **Add to Home Screen**).
+- Works offline and can be installed on the iPhone home screen: in Safari open
+  https://michele-minervini.github.io/milo/ → **•••** (or Share) → **Share** →
+  **Add to Home Screen** (turn **Open as Web App** on if it's shown) → **Add**.
 
 ## Files — what is what
 
@@ -161,9 +165,16 @@ tens of kilobytes against a 1 GB allowance.
 
 **Then, in the app.** Open Settings → *Sync across your devices*, paste that URL
 and press **Turn on**. The app invents a long random sync code and starts
-syncing. On your phone, open Settings → *Connect another device* on the first
-device and scan the QR code it shows — or paste the sync link. Both devices then
-keep themselves up to date.
+syncing. To add another device, tap **Connect another device** on the first
+one. A laptop or an Android phone can scan the QR code it shows. **iPhone: don't
+scan** — the camera opens Safari, whose saved data is separate from the Milo
+icon on your home screen. Tap **Copy** instead and get the link onto the iPhone
+without opening it: paste it into Notes, or just paste on the iPhone (the
+clipboard is shared between devices on the same Apple ID). AirDrop and tapping
+the link in a message both open it in Safari, so don't use those; in a message,
+long-press the link and choose Copy. Then paste it in Milo → Settings → *Sync
+across your devices* → **Connect**. Both devices then keep themselves up to
+date.
 
 ### What to know about it
 
@@ -226,7 +237,8 @@ sh tests/run.sh
 git commit -m "describe what changed" && git push
 ```
 
-The site updates itself in about a minute. An installed copy takes **two
+`git push` sends it to [Michele-Minervini/milo](https://github.com/Michele-Minervini/milo),
+and the site updates itself in about a minute. An installed copy takes **two
 opens** to switch: the first open, online, downloads the new release in the
 background while still showing the old one; the next open shows it. On an
 iPhone: open the app, wait a few seconds, swipe it away in the app switcher,
@@ -234,6 +246,39 @@ open it again. Settings → More shows which build a device is running.
 **Skipping the build number means phones never update**, because the app is
 served from an offline copy that only changes when the number does — the tests
 catch that before you push.
+
+## Moving from the old address
+
+Until September 2026 the app lived at
+`https://michele-minervini.github.io/calisthenics-tracker/`. Once the move is
+finished, that address is served by a separate, tiny repository,
+[Michele-Minervini/calisthenics-tracker](https://github.com/Michele-Minervini/calisthenics-tracker)
+(the local folder is `~/Documents/Projects/calisthenics-tracker-redirect`).
+Never push Milo there.
+
+- **In a browser tab** the old address forwards here, sync links included.
+  Browser tabs share their saved data with the new address (same site), so
+  nothing needs moving: just update the bookmark.
+- **An app installed from the old address** (the iPhone home-screen icon, a Mac
+  Dock app) keeps its own saved data, separate from everything else. It shows a
+  "Milo has moved" page with what it still holds, a backup button, its sync
+  link and these steps:
+  1. In the old app: save a backup file (on the iPhone, Save to Files).
+  2. In Safari, open https://michele-minervini.github.io/milo/ → **•••** (or
+     Share) → **Share** → **Add to Home Screen** (turn **Open as Web App** on if
+     it's shown) → **Add**.
+  3. Back in the old app, copy the sync link. Open the new icon; on the Today
+     tab, tap **Connect sync**, paste the link and tap **Connect**.
+  4. If the old app said some changes may not have reached the cloud (or sync
+     was off there), also open ⚙️ Settings → **Restore from file** in the new
+     icon, pick the backup and tap **OK** to merge it.
+  5. Check that your workouts and skill steps are there. Put the phone in
+     Airplane Mode, swipe Milo away and open it again: it must still load.
+  6. **Only then** delete the old icon — deleting it deletes the data saved in it.
+- **A Chrome-installed app** shares its data with Chrome, so the new address
+  already has it. When uninstalling the old one, leave **Remove this app's data
+  from Chrome** unticked: it would delete the data of the whole site, the new
+  Milo included.
 
 ## Ideas for later (v3+)
 

@@ -51,7 +51,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v20";
+  var BUILD = "milo-v21";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;

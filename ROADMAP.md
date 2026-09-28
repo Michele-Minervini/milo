@@ -3,13 +3,14 @@
 A running record of where the app is, what's next, and the reasoning behind
 the choices — so the context survives across work sessions.
 
-**Live app:** https://michele-minervini.github.io/calisthenics-tracker/
+**Live app:** https://michele-minervini.github.io/milo/ (moved from
+`…/calisthenics-tracker/` — see README, "Moving from the old address").
 
 ---
 
 ## Where we are
 
-All tiers are built, tested, and deployed (service worker `bigsix-v10`).
+All tiers are built, tested, and deployed. Settings → More shows the build a device runs.
 
 | Tier | Shipped | What it added |
 |------|---------|---------------|
@@ -17,6 +18,7 @@ All tiers are built, tested, and deployed (service worker `bigsix-v10`).
 | **Tier 1** | v5 | Log a session (sets/reps or hold time); auto-detection of the Beginner/Intermediate/Progression standard with a move-up prompt; global rest timer; training-history list; downloadable full backup file. |
 | **Tier 2** | v7–v8 | Weekly routine + "Today's session" card; smart nudge; ghost radar (past vs now); GitHub-style training heatmap; streaks; milestone timeline; per-exercise sparkline; edit a logged session; QR code for the backup link. |
 | **Tier 3** | v9–v10 | Day detail (tap a heatmap square for that day's sessions); **optional cloud sync** across devices, paired by QR. |
+| **Milo P2b** | milo-v21 | **Moved to `/milo/`** (new repo Michele-Minervini/milo). Once switched over, the old address is served by the repo `calisthenics-tracker` (local folder `calisthenics-tracker-redirect`): browser tabs are forwarded, sync links included; an app installed from the old address shows what it still holds with a backup button, its sync link and the steps to move; its `sw.js` switches off old installed copies (after a 12-second grace period for their last sync). In Milo: the sync QR tells iPhones to paste the link instead of scanning; a sync link pasted into the database box connects; "Coming from another device?" jumps to the right box. |
 | **Milo P4** | milo-v20 | **Gym exercises**: a catalogue (data.js `GYM_EXERCISES`, permanent ids) plus your own (`x_…` in `state.exercises`), a gym sheet with reps × kg per set where every ✓ saves at once, last time, a double-progression suggestion, warm-up sets recognised (and not counted), an exercise sheet (your numbers, rep range / weight step / setup note, history). Rest: +30 s / Skip, separate gym rest, kept across reloads; optional keep-screen-on. |
 | **Milo P3** | milo-v19 | **Four tabs** (Today · Body · Skills · History) with ＋ Log in the middle of the tab bar. Body: hard sets per muscle group vs target, pace, "this point last week", a balance radar, a sheet per group (what counted, 8 weeks, the skills that train it). History: week streak, month calendar with a dot per group, filterable list with milestones. Weekly targets in Settings; sync status on the gear. The day streak and heatmap are gone. |
 | **Milo P1–P2a** | v16–milo-v18 | Renamed **Milo**. Data v5 (entry kinds, per-field settings sync, a new sync record, guards against old copies), tests; quick **gym day** log; home bars of **hard sets per muscle group this week** against 10–20 (arms/legs 20–40). Plan for the rest: `~/.claude/plans/i-want-to-rename-distributed-goblet.md` (P3 tabs, P4 gym exercises, P2b move to /milo/, P5–P7). |
@@ -112,14 +114,16 @@ None committed — just a menu for later:
   a second time in a row it drops this app's offline copy (never its data) and
   loads from the network. Offline, it says so and reloads itself when the
   connection returns.
-- **Cache names carry the app's path** (`milo-v18@/calisthenics-tracker/`),
-  and cleanup only deletes this path's old versions (plus the pre-stamp
-  `bigsix-vN` caches, and only when running at `/calisthenics-tracker/`, the
-  one place that created them). Cache Storage is shared by the whole
-  `michele-minervini.github.io` origin, so a global cleanup would wipe other
-  apps' — and, after the planned move to `/milo/`, the old or new address's —
-  offline copies. The korea-trip app on the same origin still does such a
-  global cleanup; the self-repair above covers it.
+- **Cache names carry the app's path** (`milo-v21@/milo/`), and cleanup only
+  deletes this path's old versions (plus the pre-stamp `bigsix-vN` caches, and
+  only when running at `/calisthenics-tracker/`, the one place that created
+  them — `LEGACY_PATH` in sw.js, inert at `/milo/`; never change it). Cache
+  Storage is shared by the whole `michele-minervini.github.io` origin, so a
+  global cleanup would wipe other apps' offline copies — the old address's
+  switch-off worker, too, deletes only `…@/calisthenics-tracker/` and
+  `bigsix-vN`. The korea-trip app on the same origin cleans only its own
+  `korea-*` caches (fixed September 2026); the self-repair above covers any
+  app that doesn't.
 - **When re-testing after a change, hard-reload / clear the service worker
   cache first** — a stale cache once made a correct fix look broken for a while.
 - **Never do date math by adding `86400000` ms.** Use the calendar-day helpers

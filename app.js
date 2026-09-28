@@ -23,7 +23,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v20";
+  var BUILD = "milo-v21";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -832,7 +832,7 @@
     container.appendChild(canvas);
     var cap = document.createElement("p");
     cap.className = "qrcap";
-    cap.textContent = caption || "Scan with the other device's camera to open your progress.";
+    cap.textContent = caption || "Scan with the other device's camera to open your progress. For Milo on an iPhone home screen, copy the link instead and paste it there under Settings → More → Progress link.";
     container.appendChild(cap);
     return true;
   }
@@ -1254,7 +1254,7 @@
   function comeCardHTML() {
     return '<div class="today-card comecard">' +
       '<h2 class="today-title">Coming from another device?</h2>' +
-      '<p class="cc-text">Bring your workouts and skill steps over: connect sync, or restore a backup file.</p>' +
+      '<p class="cc-text">Bring your workouts and skill steps over: paste the sync link from your other device, or restore a backup file.</p>' +
       '<div class="cc-btns"><button class="btn primary" id="comeSyncBtn" type="button">Connect sync</button>' +
       '<button class="btn" id="comeRestoreBtn" type="button">Restore a backup</button></div>' +
       '<button class="linkbtn" id="comeNoBtn" type="button">No, I&#8217;m starting fresh</button></div>';
@@ -1326,8 +1326,8 @@
     on("#toBodyBtn", function () { showTab("body", true); });
     on("#whatsNewBtn", function () { pushView({ t: "whatsnew" }); });
     on("#whatsNewX", function () { setFlag(WHATSNEW_KEY, "done"); renderToday(); restoreFocus(null, ""); });
-    on("#comeSyncBtn", openSettings);
-    on("#comeRestoreBtn", openSettings);
+    on("#comeSyncBtn", function () { openSettingsAt("#pairCode", true); });
+    on("#comeRestoreBtn", function () { openSettingsAt("#restoreBtn", true); });
     on("#comeNoBtn", function () { setFlag(COME_KEY, "done"); renderToday(); });
     host.querySelectorAll("[data-group]").forEach(function (b) {
       b.addEventListener("click", function () { openGroup(b.getAttribute("data-group")); });
@@ -3120,6 +3120,16 @@
   function openStep(areaIdx, stepIdx) { pushView({ t: "step", a: areaIdx, s: stepIdx }); }
   function openSettings() { pushView({ t: "settings" }); }
 
+  // Opens Settings scrolled to one control: a device that is joining goes
+  // straight to the sync-link box (or to Restore) instead of the top.
+  function openSettingsAt(sel, focusIt) {
+    openSettings();
+    var sheet = $("#sheet"), body = $(".sheet-body", sheet), el = $(sel, sheet);
+    if (!body || !el) return;
+    body.scrollTop += el.getBoundingClientRect().top - body.getBoundingClientRect().top - 24;
+    if (focusIt) { try { el.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  }
+
   function openCurrentStep(areaIdx) {
     var a = AREAS[areaIdx];
     pushView({ t: "area", a: areaIdx });
@@ -3918,7 +3928,7 @@
         "<p>Log a session on your phone, see it on your laptop. Free, and the app still works offline.</p>" +
         '<div class="copyrow"><input type="text" id="syncUrl" placeholder="Paste your database URL&#8230;" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="syncOnBtn">Turn on</button></div>' +
         '<p class="hint">One-off setup: make your own free database — four steps, under <strong>Cloud sync setup</strong> in the README — then paste the address from its <em>Data</em> tab above.</p>' +
-        '<div class="copyrow"><input type="text" id="pairCode" placeholder="&#8230;or paste a sync link" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="pairBtn">Connect</button></div>';
+        '<div class="copyrow"><input type="text" id="pairCode" placeholder="&#8230;or paste a sync link" aria-label="Sync link from your other device" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn" id="pairBtn">Connect</button></div>';
     }
     // An older copy of the app is still writing the old-format record after
     // this device moved on: its sessions still arrive here, but it can't see
@@ -4014,7 +4024,17 @@
 
     var onBtn = $("#syncOnBtn", sheet);
     if (onBtn) onBtn.addEventListener("click", function () {
-      var url = SYNC.normalizeURL($("#syncUrl", sheet).value);
+      var typed = $("#syncUrl", sheet).value;
+      // A sync link pasted into this box instead of the one below: connect
+      // with it, rather than starting a second, empty sync.
+      if (typed.indexOf("#sync=") !== -1) {
+        var paired = SYNC.parsePairing(typed);
+        if (!paired) { toast("That doesn't look like a sync link"); return; }
+        startSync(paired, "Device connected ✓");
+        renderSheet();
+        return;
+      }
+      var url = SYNC.normalizeURL(typed);
       if (!url) { toast("That doesn't look like a Firebase database URL"); return; }
       // First device: it invents the secret code the others will be given.
       startSync({ url: url, code: SYNC.makeCode(), lastSync: 0 }, "Sync turned on ✓");
@@ -4040,7 +4060,10 @@
       var box = $("#pairbox", sheet);
       if (box.childNodes.length) { box.innerHTML = ""; this.innerHTML = "&#9636; Connect another device"; return; }
       var link = location.origin + location.pathname + SYNC.pairingHash(syncCfg);
-      var drew = renderQR(box, link, "Scan this with your other device to connect it. Anyone who scans it can read and change your training data, so don't share it.");
+      var drew = renderQR(box, link, "Scan this with your other device to connect it. On an iPhone, don't scan: the camera opens the browser, not your Milo icon. " +
+        "Tap Copy and get the link onto the iPhone without opening it (paste it into a note, or just paste on the iPhone if it shares this device's clipboard), " +
+        "then in Milo open Settings → Sync across your devices, paste it and tap Connect. " +
+        "Anyone with this link can read and change your training data, so don't share it.");
       if (drew) this.innerHTML = "&#9636; Hide the code";
       // The text link is the fallback when a camera can't be pointed at a screen.
       var row = document.createElement("div");
