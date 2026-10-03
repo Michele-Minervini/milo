@@ -29,7 +29,7 @@
    call useExercises([]) when they are done.
 
    Reads the tables in data.js (AREAS, GROUP_INFO, AREA_GROUPS,
-   VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES) and the
+   VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED) and the
    calendar-day helpers and sanitizeExercise in model.js, so it
    loads after both and before app.js.
 
@@ -51,7 +51,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v21";
+  var BUILD = "milo-v22";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -69,6 +69,7 @@ var TRAINING = (function () {
   var BY_VARIATION = VARIATION_GROUPS;
   var BY_QUICK = QUICK_GROUPS;
   var CATALOGUE = GYM_EXERCISES;
+  var RETIRED_IDS = GYM_RETIRED;
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
@@ -126,7 +127,9 @@ var TRAINING = (function () {
   // the step), or add the other 10 % of help on an assisted machine.
   var BACKOFF = 0.9;
   // A step up bigger than this share of the weight aims BIG_JUMP_REPS
-  // lower than the bottom of the range.
+  // lower than the bottom of the range. Not for added weight (pull-ups,
+  // dips): what you lift there is your body plus the kg, so 2.5 → 5 kg is
+  // a few per cent, not double — and the app doesn't know your body weight.
   var BIG_JUMP = 0.1;
   var BIG_JUMP_REPS = 2;
   // Sets a suggestion asks for: the last session's working sets, this
@@ -898,6 +901,11 @@ var TRAINING = (function () {
   var BUILT_IN = dict();
   CATALOGUE.forEach(function (x) { if (x && typeof x.id === "string") BUILT_IN[x.id] = x; });
 
+  // Built-in exercises taken out of the picker (data.js, GYM_RETIRED). They
+  // still resolve, so sessions logged with them keep their name and count.
+  var RETIRED = dict();
+  RETIRED_IDS.forEach(function (id) { if (typeof id === "string") RETIRED[id] = true; });
+
   // THE ONE PIECE OF MODULE STATE: every exercise that resolves, by id —
   // the built-in ones merged with their tweaks, and your own. Replaced
   // whole by useExercises(); never changed in place.
@@ -911,7 +919,7 @@ var TRAINING = (function () {
       lo: range ? o.lo : b.lo, hi: range ? o.hi : b.hi,
       inc: o && o.inc !== null ? o.inc : b.inc,
       perHand: b.perHand, load: b.load, timed: b.timed,
-      note: o ? o.note : "", custom: false, del: false, known: LOADS.indexOf(b.load) !== -1
+      note: o ? o.note : "", custom: false, del: false, retired: own(RETIRED, b.id), known: LOADS.indexOf(b.load) !== -1
     };
   }
 
@@ -922,7 +930,7 @@ var TRAINING = (function () {
     return {
       id: r.id, name: r.name, p: p, s: r.sec.filter(function (g) { return isGroup(g) && g !== p; }), equip: r.equip,
       lo: r.lo, hi: r.hi, inc: r.inc, perHand: r.perHand, load: r.load, timed: r.timed,
-      note: r.note, custom: true, del: r.del, known: LOADS.indexOf(r.load) !== -1
+      note: r.note, custom: true, del: r.del, retired: false, known: LOADS.indexOf(r.load) !== -1
     };
   }
 
@@ -962,7 +970,7 @@ var TRAINING = (function () {
 
   // An exercise, ready to show and to progress:
   //   { id, name, p, s, equip, lo, hi, inc, perHand, load, timed, note,
-  //     custom, del, known }
+  //     custom, del, retired, known }
   //   p        the group one hard set counts 1 for (null for one of your
   //            own whose group isn't one of the six)
   //   s        the groups it counts ½ for, in GROUPS order
@@ -972,6 +980,8 @@ var TRAINING = (function () {
   //   custom   one of your own ("x_" id)
   //   del      one of your own that was removed from the list: it still
   //            resolves, so old entries keep their name and still count
+  //   retired  a built-in one taken out of the picker (GYM_RETIRED): it
+  //            still resolves too, for the same reason
   //   known    this version knows what its kg mean (load is ext, added,
   //            assist or bw); false for a load type from a newer version:
   //            then every set with reps counts, and it progresses by reps
@@ -983,14 +993,14 @@ var TRAINING = (function () {
     return x ? copyEx(x) : null;
   }
 
-  // Every exercise that isn't deleted, built-in and your own, grouped by p
+  // Every exercise that isn't deleted or retired, built-in and your own, grouped by p
   // in GROUPS order (one without a group last), each group by name (case
   // ignored), then id. Fresh copies.
   function exerciseList() {
     var rank = function (x) { var i = GROUPS.indexOf(x.p); return i === -1 ? GROUPS.length : i; };
     var low = function (s) { return String(s).toLowerCase(); };
     return Object.keys(resolved).map(function (id) { return resolved[id]; })
-      .filter(function (x) { return !x.del; })
+      .filter(function (x) { return !x.del && !x.retired; })
       .sort(function (a, b) {
         return (rank(a) - rank(b)) ||
           (low(a.name) < low(b.name) ? -1 : (low(a.name) > low(b.name) ? 1 : 0)) ||
@@ -1241,7 +1251,8 @@ var TRAINING = (function () {
   //   Weight mode (ext; added and assist with W > 0):
   //   "up"      every working set at W reached hi: kg W + inc (assisted:
   //             W − inc, not below 0); targets lo, or lo − 2 (at least 1)
-  //             when the change is more than 10 % of W
+  //             when the change is more than 10 % of W (never for added
+  //             weight: the body is most of the load)
   //   "deload"  the last two sessions both at W, both with a working set
   //             at W under lo, and the latest with no more reps at W in
   //             total than the one before: kg as for "return", targets lo
@@ -1281,7 +1292,7 @@ var TRAINING = (function () {
       var kg = mode === "assist" ? Math.max(0, W - inc) : W + inc;
       // A change of exactly 10 % divides to exactly 0.1 (the double nearest
       // a tenth, as the constant is), so it isn't "more than".
-      var big = Math.abs(kg - W) / W > BIG_JUMP;
+      var big = ex.load !== "added" && Math.abs(kg - W) / W > BIG_JUMP;
       return make("up", kg, n, fill(big ? Math.max(1, lo - BIG_JUMP_REPS) : lo, n));
     }
     var prev = tops[1];
@@ -1293,7 +1304,7 @@ var TRAINING = (function () {
       if (tops[j].W === W) continue;
       var from = tops[j].W;
       var harder = mode === "assist" ? W < from : W > from;
-      if (harder && from > 0 && Math.abs(W - from) / from > BIG_JUMP) floor = Math.max(1, lo - BIG_JUMP_REPS);
+      if (harder && from > 0 && ex.load !== "added" && Math.abs(W - from) / from > BIG_JUMP) floor = Math.max(1, lo - BIG_JUMP_REPS);
       break;
     }
     var short = function (s) { return s.at.some(function (r) { return r < floor; }); };

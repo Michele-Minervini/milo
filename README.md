@@ -39,8 +39,8 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
 - **＋ Log.** Today's session moves in one tap, any other skill, a **gym
   exercise**, or a **quick gym log** (just the working sets per muscle group,
   when you don't want to log exercises).
-- **Gym exercises.** About 40 common exercises (barbell, dumbbells, machines,
-  cables, dips, planks…) plus your own. Log each set as reps × kg and tick it:
+- **Gym exercises.** About 55 exercises (barbell, dumbbells, machines, cables,
+  push-ups, pull-ups, dips, abs work…) plus your own. Log each set as reps × kg and tick it:
   every tick is saved at once, and starts the rest timer. Milo shows what you
   did last time and suggests the next step — add weight when you hit the top of
   the rep range on every set, otherwise one more rep, and lighter after a long
@@ -51,10 +51,17 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   save. The app checks the result against the goals and marks the standard you
   met automatically; when you hit the Progression goal it offers to move you up
   a step.
-- **Rest timer.** One-tap presets (1/2/3/5 min) start a floating countdown that
-  keeps running while you browse other exercises and pings when it's done; tap
+- **Rest timer.** One-tap presets (from 50 seconds to 5 minutes) start a
+  floating countdown that keeps running while you browse other exercises; tap
   it for +30 s or Skip. Gym sets use their own rest (Settings), and Milo can keep
-  the screen on during a workout.
+  the screen on during a workout. When the rest ends the pill turns green and
+  pulses, and it beeps — but an iPhone gives web apps no vibration and mutes
+  the beep on silent, so Settings also offers **a notification when the rest
+  ends**: the only thing that can buzz there, and whether it does is up to the
+  iPhone's own notification settings (Settings has a test button). It only
+  fires while Milo is open on screen — nothing runs once the phone locks or
+  another app is in front — so with the option on Milo keeps the screen on
+  during the rest.
   Each exercise also shows a top-set sparkline over time.
 - **It tells you what to do.** Every movement comes with a prescription — the
   exercise, the sets and reps, and which standard you're chasing — worked out

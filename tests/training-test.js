@@ -1099,6 +1099,8 @@ section("the mockup's pretend week (private/mockups/p3/NOTES.md), Wednesday 23 S
 /* ---------- The gym (P4) ---------- */
 
 const CAT = page.get("GYM_EXERCISES");
+const RETIRED = Array.from(page.get("GYM_RETIRED"));
+const LISTED = CAT.filter(c => RETIRED.indexOf(c.id) === -1);
 // A gym entry. kg: one number for every set, or a list.
 function G(ts, exId, sets, kg, id) {
   n++;
@@ -1124,11 +1126,11 @@ section("gym exercises: the catalogue, your own, and tweaks");
   T.useExercises([]);
   eq("a built-in exercise, every field, in order", T.exercise("bench_bb"), {
     id: "bench_bb", name: "Barbell bench press", p: "chest", s: ["shoulders", "arms"], equip: "barbell", lo: 6, hi: 10, inc: 2.5,
-    perHand: false, load: "ext", timed: false, note: "", custom: false, del: false, known: true
+    perHand: false, load: "ext", timed: false, note: "", custom: false, del: false, retired: false, known: true
   });
   const off = CAT.filter(c => !same(T.exercise(c.id), {
     id: c.id, name: c.name, p: c.p, s: c.s, equip: c.equip, lo: c.lo, hi: c.hi, inc: c.inc, perHand: c.perHand,
-    load: c.load, timed: c.timed, note: "", custom: false, del: false, known: true
+    load: c.load, timed: c.timed, note: "", custom: false, del: false, retired: RETIRED.indexOf(c.id) !== -1, known: true
   })).map(c => c.id);
   check("all " + CAT.length + " built-in exercises resolve to the catalogue's values", !off.length, off.join(", "));
   {
@@ -1140,9 +1142,16 @@ section("gym exercises: the catalogue, your own, and tweaks");
   ODD_IDS.forEach(id => eq("id " + J(id) + " → null", T.exercise(id), null));
 
   const list = T.exerciseList();
-  eq("the list: every built-in exercise, once", list.map(x => x.id).sort(), CAT.map(c => c.id).sort());
+  eq("the list: every built-in exercise that isn't retired, once", list.map(x => x.id).sort(), LISTED.map(c => c.id).sort());
   eq("…chest first, by name", list.filter(x => x.p === "chest").map(x => x.id),
-    ["bench_bb", "fly_cable", "dips", "bench_db", "incline_db", "chest_press", "pec_deck"]);
+    ["bench_bb", "fly_cable", "pushup_close", "pushup_decline", "dips", "bench_db", "incline_db", "chest_press", "pec_deck", "pushup_std", "pushup_wide"]);
+  eq("retired exercises (assisted pull-up, cable crunch, ab wheel) are not in the list", list.filter(x => RETIRED.indexOf(x.id) !== -1).length, 0);
+  eq("…but still resolve, marked retired, with their name and groups",
+    RETIRED.map(id => { const x = T.exercise(id); return x && [x.name, x.p, x.retired, x.del]; }),
+    [["Assisted pull-up", "back", true, false], ["Cable crunch", "abs", true, false], ["Ab wheel", "abs", true, false]]);
+  eq("…and still count: 3 sets of the ab wheel are 3 for abs",
+    T.weekVolume([G(L(2026, 10, 7, 18), "ab_wheel", [12, 10, 9], 0, "rw")], L(2026, 10, 7, 20)).abs, 3);
+  eq("every other exercise says retired: false", list.filter(x => x.retired !== false).length, 0);
   eq("…groups in GROUPS order", list.map(x => x.p).filter((p, i, a) => a.indexOf(p) === i), M.GROUPS);
   check("…each group by name", list.every((x, i) => !i || list[i - 1].p !== x.p || list[i - 1].name.toLowerCase() <= x.name.toLowerCase()));
   list[0].s.push("legs");
@@ -1156,7 +1165,7 @@ section("gym exercises: the catalogue, your own, and tweaks");
     { id: "constructor", inc: 5, lo: 1, hi: 2, note: "", mts: 5 }]);
   eq("a tweak replaces lo, hi, inc and the note", T.exercise("bench_bb"), {
     id: "bench_bb", name: "Barbell bench press", p: "chest", s: ["shoulders", "arms"], equip: "barbell", lo: 4, hi: 6, inc: 1.25,
-    perHand: false, load: "ext", timed: false, note: "Grip 81", custom: false, del: false, known: true
+    perHand: false, load: "ext", timed: false, note: "Grip 81", custom: false, del: false, retired: false, known: true
   });
   eq("a tweak with nulls keeps the catalogue's numbers (a note only)", [T.exercise("pulldown").lo, T.exercise("pulldown").hi, T.exercise("pulldown").inc, T.exercise("pulldown").note], [8, 12, 2.5, "Pin 7"]);
   eq("a weight step only", [T.exercise("leg_press").lo, T.exercise("leg_press").hi, T.exercise("leg_press").inc], [8, 12, 10]);
@@ -1168,14 +1177,14 @@ section("gym exercises: the catalogue, your own, and tweaks");
   T.useExercises([SLED, OLD, NOGROUP, BAND]);
   eq("your own exercise: group → p, sec → s in GROUPS order without p", T.exercise("x_sled"), {
     id: "x_sled", name: "Sled push", p: "legs", s: ["back", "abs"], equip: "other", lo: 10, hi: 20, inc: 10,
-    perHand: false, load: "ext", timed: false, note: "Lane 2", custom: true, del: false, known: true
+    perHand: false, load: "ext", timed: false, note: "Lane 2", custom: true, del: false, retired: false, known: true
   });
   eq("the tweaks are gone once the list no longer has them", [T.exercise("bench_bb").lo, T.exercise("bench_bb").note], [6, ""]);
   eq("a deleted one still resolves (old entries keep their name)", [T.exercise("x_old").name, T.exercise("x_old").del], ["Old rower", true]);
   eq("a group that isn't one of the six → p null", [T.exercise("x_grip").p, T.exercise("x_grip").s], [null, ["arms"]]);
   eq("a load type this version doesn't know → known false", [T.exercise("x_band").load, T.exercise("x_band").known], ["band", false]);
   const l2 = T.exerciseList();
-  eq("the list: built-in + your own, not the deleted one", [l2.length, l2.some(x => x.id === "x_old")], [CAT.length + 3, false]);
+  eq("the list: built-in + your own, not the deleted one", [l2.length, l2.some(x => x.id === "x_old")], [LISTED.length + 3, false]);
   eq("…legs by name, Sled push at the end", l2.filter(x => x.p === "legs").map(x => x.name).slice(-3), ["Leg press", "Romanian deadlift", "Sled push"]);
   eq("…the one without a group comes last", l2[l2.length - 1].id, "x_grip");
   eq("…Band pull-apart among shoulders, by name", l2.filter(x => x.p === "shoulders").map(x => x.id),
@@ -1191,7 +1200,7 @@ section("gym exercises: the catalogue, your own, and tweaks");
   T.useExercises([{ id: "x_raw", name: "  Raw   name  ", group: "arms", sec: "arms", lo: "x", timed: true, mts: 1 }]);
   eq("records are sanitized on the way in (MODEL.sanitizeExercise)", T.exercise("x_raw"), {
     id: "x_raw", name: "Raw name", p: "arms", s: [], equip: "other", lo: 20, hi: 60, inc: 2.5,
-    perHand: false, load: "ext", timed: true, note: "", custom: true, del: false, known: true
+    perHand: false, load: "ext", timed: true, note: "", custom: true, del: false, retired: false, known: true
   });
   const threw = [];
   [null, undefined, "x", 5, {}, [null, 7, "a", {}, [], { id: "__proto__" }, { id: "x_" }, { id: 5 }, { id: "x_ok", name: {} }]].forEach(v => {
@@ -1199,9 +1208,9 @@ section("gym exercises: the catalogue, your own, and tweaks");
   });
   check("junk to useExercises never throws", !threw.length, threw.join("; "));
   eq("…and leaves the built-in exercises, plus the records that sanitize (\"x_\" and \"x_ok\", both unnamed)", [T.exerciseList().length, T.exercise("x_ok") && T.exercise("x_ok").name],
-    [CAT.length + 2, "Unnamed exercise"]);
+    [LISTED.length + 2, "Unnamed exercise"]);
   T.useExercises("not a list");
-  eq("anything that isn't a list: the built-in exercises only", [T.exerciseList().length, T.exercise("x_ok")], [CAT.length, null]);
+  eq("anything that isn't a list: the built-in exercises only", [T.exerciseList().length, T.exercise("x_ok")], [LISTED.length, null]);
   T.useExercises([]);
 }
 
@@ -1546,7 +1555,14 @@ section("suggestions: double progression for the next session");
   eq("…60, 60 → harder", K(S("plank", [G(D(13), "plank", [60, 60], 0)])), ["harder", 0, 2, [60, 60]]);
   eq("dips (added, 8–12): 10, 9 at bodyweight → reps 11, 10", K(S("dips", [G(D(13), "dips", [10, 9], 0)])), ["reps", 0, 2, [11, 10]]);
   eq("…12 × 3 at bodyweight → harder (add weight)", K(S("dips", [G(D(13), "dips", [12, 12, 12], 0)])), ["harder", 0, 3, [12, 12, 12]]);
-  eq("…with 10 kg on: 12 × 3 → up 12.5 kg; 25 % → lo − 2", K(S("dips", [G(D(13), "dips", [12, 12, 12], 10)])), ["up", 12.5, 3, [6, 6, 6]]);
+  eq("…with 10 kg on: 12 × 3 → up 12.5 kg at lo (added weight never counts as a big jump: the body is most of the load)",
+    K(S("dips", [G(D(13), "dips", [12, 12, 12], 10)])), ["up", 12.5, 3, [8, 8, 8]]);
+  eq("pull-up (added, 6–12): 12 × 3 at bodyweight → harder (add weight)", K(S("pullup_std", [G(D(13), "pullup_std", [12, 12, 12], 0)])), ["harder", 0, 3, [12, 12, 12]]);
+  eq("…12 × 3 with 2.5 kg → up 5 kg for 6 each, not 4", K(S("pullup_std", [G(D(13), "pullup_std", [12, 12, 12], 2.5)])), ["up", 5, 3, [6, 6, 6]]);
+  eq("…then two sessions under 6 at 5 kg → deload to 2.5 kg (the floor stays lo after an added-weight step)",
+    K(S("pullup_std", [G(D(6), "pullup_std", [12, 12, 12], 2.5), G(D(9), "pullup_std", [5, 5, 5], 5), G(D(13), "pullup_std", [5, 5, 5], 5)])), ["deload", 2.5, 3, [6, 6, 6]]);
+  eq("weighted knee raise (a held dumbbell, 2 kg steps): 15 × 3 at 4 kg → 6 kg for 10 each", K(S("knee_raise_w", [G(D(13), "knee_raise_w", [15, 15, 15], 4)])), ["up", 6, 3, [10, 10, 10]]);
+  eq("hold till failure (20–120 s): 75, 50 s → 80, 55 s", K(S("hold_failure", [G(D(13), "hold_failure", [75, 50], 0)])), ["reps", 0, 2, [80, 55]]);
   eq("…9, 8 with 10 kg → same, 10, 9", K(S("dips", [G(D(13), "dips", [9, 8], 10)])), ["same", 10, 2, [10, 9]]);
   eq("…a bodyweight set, then 8, 8 with 10 kg → same at 10 kg, all 3 sets", K(S("dips", [G(D(13), "dips", [10, 8, 8], [0, 10, 10])])), ["same", 10, 3, [9, 9, 9]]);
   // Two entries of one exercise on one day are one session.
@@ -1607,7 +1623,7 @@ section("the gym: every catalogue exercise's first sessions, end to end");
     const reps = c.timed || c.load === "bw";
     const want = reps ? ["harder", 0, 2, [c.hi, c.hi]]
       : c.load === "assist" ? ["up", 20 - c.inc, 2, fill2(Math.abs(c.inc) / 20 > 0.1 ? Math.max(1, c.lo - 2) : c.lo)]
-        : ["up", 20 + c.inc, 2, fill2(c.inc / 20 > 0.1 ? Math.max(1, c.lo - 2) : c.lo)];
+        : ["up", 20 + c.inc, 2, fill2(c.load !== "added" && c.inc / 20 > 0.1 ? Math.max(1, c.lo - 2) : c.lo)];
     if (!same([sg.kind, sg.kg, sg.sets, sg.targets], want)) bad.push(c.id + " " + J([sg.kind, sg.kg, sg.sets, sg.targets]) + " ≠ " + J(want));
     const mid = T.suggest(c.id, log, L(2026, 9, 15, 7));
     const wantMid = [reps ? "reps" : "same", kg, 2, [Math.min(c.hi, c.hi), Math.min(c.hi, c.lo + (c.timed ? 5 : 1))]];
@@ -1629,10 +1645,11 @@ section("the gym with a big log stays quick");
   const t0 = Date.now(), now = L(2026, 9, 30, 12);
   T.weekStrip(big, now); T.weekHistory(big, now); T.groupNudge(big, now, [10, 20]); T.verdict(big, now, [10, 20]);
   M.GROUPS.forEach(g => { T.breakdown(big, now, g); T.lastTrained(big, g, now); });
-  T.exerciseList().forEach(x => { T.suggest(x.id, big, now); T.lastSession(big, x.id); });
+  const everyEx = T.exerciseList();
+  everyEx.forEach(x => { T.suggest(x.id, big, now); T.lastSession(big, x.id); });
   T.best(big, "bench_bb");
   const ms = Date.now() - t0;
-  check("3,000 entries, two thirds gym: the tabs' numbers plus a suggestion and last session for all 43 exercises in well under a second", ms < 1000, "took " + ms + " ms");
+  check("3,000 entries, two thirds gym: the tabs' numbers plus a suggestion and last session for all " + everyEx.length + " exercises in well under a second", ms < 1000, "took " + ms + " ms");
   T.useExercises([]);
 }
 

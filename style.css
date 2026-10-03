@@ -772,7 +772,14 @@ body.sheet-open.pill-on #toast { bottom: calc(var(--bottom-chrome) + 72px); }
 .restmenu { display: inline-flex; gap: 4px; }
 .restmenu[hidden] { display: none; }
 .restmenu button { padding: 0 14px; background: rgba(127, 127, 127, 0.28); font-weight: 700; }
-#restpill.done { background: var(--good); color: var(--page); }
+#restpill.done { background: var(--good); color: var(--page); animation: restdone 0.9s ease-out 3; }
+/* The end of a rest has to be seen from a bench: phones give web apps no
+   vibration, and the beep is muted on silent. */
+@keyframes restdone {
+  0%   { box-shadow: 0 0 0 0 var(--good); transform: scale(1); }
+  35%  { transform: scale(1.12); }
+  100% { box-shadow: 0 0 0 26px transparent; transform: scale(1); }
+}
 
 .visually-hidden {
   position: absolute;
@@ -789,6 +796,7 @@ body.sheet-open.pill-on #toast { bottom: calc(var(--bottom-chrome) + 72px); }
 
 @media (prefers-reduced-motion: reduce) {
   #restpill { transition: none !important; }
+  #restpill.done { animation: none; }
 }
 
 /* ============================================================

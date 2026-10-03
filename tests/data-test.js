@@ -14,6 +14,7 @@ const AREAS = page.get("AREAS"), VARIATIONS = page.get("VARIATIONS");
 const GROUP_INFO = page.get("GROUP_INFO"), AREA_GROUPS = page.get("AREA_GROUPS");
 const VARIATION_GROUPS = page.get("VARIATION_GROUPS"), QUICK_GROUPS = page.get("QUICK_GROUPS");
 const GYM = page.get("GYM_EXERCISES"), GROUP_DEFAULTS = page.get("GROUP_DEFAULTS");
+const GYM_RETIRED = page.get("GYM_RETIRED");
 const GROUPS = Array.from(M.GROUPS);
 const J = JSON.stringify;
 const keys = o => Object.keys(o);
@@ -148,6 +149,9 @@ const GYM_INC = { barbell: 2.5, dumbbell: 2, machine: 5, cable: 2.5, kettlebell:
 const EQUIPS = keys(GYM_INC);
 const LOADS = ["ext", "added", "assist", "bw"];
 const GYM_FIELDS = ["id", "name", "p", "s", "equip", "lo", "hi", "inc", "perHand", "load", "timed"];
+// The one step that doesn't follow its equipment: the weighted knee raise is
+// a bodyweight exercise whose added weight is a held dumbbell, not a plate.
+const GYM_INC_OWN = { knee_raise_w: 2 };
 
 // Everything wrong with one catalogue entry ([] = fine).
 function gymProblems(e) {
@@ -174,7 +178,7 @@ function gymProblems(e) {
     out.push("not 1 ≤ lo ≤ hi ≤ 600 (whole numbers)");
   if (!(typeof e.inc === "number" && e.inc >= 0.25 && e.inc <= 50 && e.inc * 4 === Math.round(e.inc * 4)))
     out.push("inc is not a multiple of 0.25 kg in 0.25–50");
-  else if (e.inc !== GYM_INC[e.equip]) out.push("inc " + e.inc + " but " + e.equip + " steps by " + GYM_INC[e.equip]);
+  else if (e.inc !== (GYM_INC_OWN[e.id] || GYM_INC[e.equip])) out.push("inc " + e.inc + " but " + e.equip + " steps by " + GYM_INC[e.equip]);
   if (typeof e.perHand !== "boolean") out.push("perHand is not true/false");
   else if (e.perHand && e.equip !== "dumbbell" && e.equip !== "kettlebell") out.push("perHand without dumbbells or kettlebells");
   if (typeof e.timed !== "boolean") out.push("timed is not true/false");
@@ -186,7 +190,7 @@ function gymProblems(e) {
   return out;
 }
 
-check("GYM_EXERCISES is a list of about 42", Array.isArray(GYM) && GYM.length >= 40, GYM && GYM.length);
+check("GYM_EXERCISES is a list of about 60", Array.isArray(GYM) && GYM.length >= 55, GYM && GYM.length);
 GYM.forEach(e => {
   const p = gymProblems(e);
   check((e && e.id) + " — " + (e && e.name), !p.length, p.join("; "));
@@ -199,17 +203,25 @@ GYM.forEach(e => {
   const dupN = names.filter((n, i) => names.indexOf(n) !== i);
   check("names are unique (the picker lists exercises by name)", !dupN.length, dupN.join(", "));
   GROUPS.forEach(g => {
-    const n = GYM.filter(e => e.p === g).length;
-    check(g + ": at least 4 exercises to choose from", n >= 4, n);
+    const n = GYM.filter(e => e.p === g && GYM_RETIRED.indexOf(e.id) === -1).length;
+    check(g + ": at least 4 exercises to choose from (retired ones not counted)", n >= 4, n);
   });
-  check("the plank is the only timed exercise, 20–60 s",
-    same(GYM.filter(e => e.timed).map(e => [e.id, e.lo, e.hi]), [["plank", 20, 60]]));
+  check("the timed exercises are the two holds: the plank 20–60 s, the hold till failure 20–120 s",
+    same(GYM.filter(e => e.timed).map(e => [e.id, e.lo, e.hi]), [["plank", 20, 60], ["hold_failure", 20, 120]]));
   check("kg per hand: the dumbbell-in-each-hand and one-arm exercises, not the goblet squat",
     same(GYM.filter(e => e.perHand).map(e => e.id),
-      ["bench_db", "incline_db", "row_db", "ohp_db", "lateral_db", "rear_fly_db", "curl_db", "hammer_db", "bulgarian_db"]));
-  check("added weight: dips, weighted chin-up, back extension, bench dips · assisted: the pull-up machine · bodyweight only: ab wheel, plank",
+      ["bench_db", "incline_db", "row_db", "row_chest_db", "ohp_db", "lateral_db", "rear_fly_db", "curl_db", "hammer_db",
+        "wrist_curl_db", "wrist_curl_rev_db", "bulgarian_db"]));
+  check("added weight: dips, chin-up, pull-up, back extension, bench dips, weighted knee raise · assisted: the pull-up machine · " +
+    "bodyweight only: the push-ups, ab wheel, plank and the floor or hanging abs work",
     same(["added", "assist", "bw"].map(l => GYM.filter(e => e.load === l).map(e => e.id)),
-      [["dips", "chinup_w", "back_ext", "bench_dips"], ["pullup_assist"], ["ab_wheel", "plank"]]));
+      [["dips", "chinup_w", "pullup_std", "back_ext", "bench_dips", "knee_raise_w"], ["pullup_assist"],
+        ["pushup_std", "pushup_close", "pushup_wide", "pushup_decline", "ab_wheel", "plank",
+          "leg_lift", "leg_raise_single", "around_world", "knee_raise_side", "hold_failure"]]));
+  check("push-ups count like a press (chest + ½ shoulders, ½ arms), pulls give ½ to arms, the straight-arm pulldown doesn't",
+    ["pushup_std", "pushup_close", "pushup_wide", "pushup_decline"].every(id => same(GYM.filter(e => e.id === id).map(e => [e.p].concat(Array.from(e.s)))[0], ["chest", "shoulders", "arms"])) &&
+    ["pullup_std", "row_machine", "pulldown_close", "row_chest_db"].every(id => same(GYM.filter(e => e.id === id).map(e => [e.p].concat(Array.from(e.s)))[0], ["back", "arms"])) &&
+    same(GYM.filter(e => e.id === "pulldown_straight").map(e => [e.p].concat(Array.from(e.s)))[0], ["back"]));
   const byId = {};
   GYM.forEach(e => { byId[e.id] = e; });
   const groupsOf = id => byId[id] ? [byId[id].p].concat(Array.from(byId[id].s)) : null;
@@ -232,13 +244,30 @@ section("frozen gym ids (they live in stored logs)");
     "ohp_bb", "ohp_db", "lateral_db", "lateral_cable", "rear_fly_db", "face_pull",
     "curl_db", "hammer_db", "curl_bb", "pushdown", "oh_ext_cable", "skull_bb", "bench_dips",
     "crunch_cable", "ab_wheel", "plank", "pallof",
-    "squat_bb", "leg_press", "hack_squat", "rdl_bb", "leg_curl", "leg_ext", "bulgarian_db", "hip_thrust_bb", "calf_raise", "goblet_squat"
+    "squat_bb", "leg_press", "hack_squat", "rdl_bb", "leg_curl", "leg_ext", "bulgarian_db", "hip_thrust_bb", "calf_raise", "goblet_squat",
+    // milo-v22
+    "pushup_std", "pushup_close", "pushup_wide", "pushup_decline",
+    "pullup_std", "row_machine", "pulldown_close", "pulldown_straight", "row_chest_db",
+    "wrist_curl_db", "wrist_curl_rev_db",
+    "knee_raise_w", "leg_lift", "leg_raise_single", "around_world", "knee_raise_side", "hold_failure"
   ];
   const ids = GYM.map(e => e.id);
   const gone = FROZEN.filter(id => ids.indexOf(id) === -1);
   check("no shipped id has been renamed or removed", !gone.length, "missing: " + gone.join(", ") + " — put them back, stored logs use them");
   const fresh = ids.filter(id => FROZEN.indexOf(id) === -1);
   check("every id is in the frozen list", !fresh.length, "new: " + fresh.join(", ") + " — add them to FROZEN (they are permanent from now on)");
+}
+
+section("retired gym exercises (out of the picker, still in the catalogue)");
+{
+  check("GYM_RETIRED is a list of ids", Array.isArray(GYM_RETIRED) && GYM_RETIRED.every(id => typeof id === "string"), J(GYM_RETIRED));
+  check("the assisted pull-up, the cable crunch and the ab wheel are retired",
+    same(Array.from(GYM_RETIRED), ["pullup_assist", "crunch_cable", "ab_wheel"]), J(GYM_RETIRED));
+  const missing = Array.from(GYM_RETIRED).filter(id => !GYM.some(e => e.id === id));
+  check("every retired id is still in the catalogue (retiring never removes)", !missing.length, missing.join(", "));
+  check("no retired id twice", new Set(GYM_RETIRED).size === GYM_RETIRED.length, J(GYM_RETIRED));
+  const inDefaults = Array.from(GYM_RETIRED).filter(id => GROUPS.some(g => Array.from(GROUP_DEFAULTS[g] || []).indexOf(id) !== -1));
+  check("no retired exercise is a default of a gym day", !inDefaults.length, inDefaults.join(", "));
 }
 
 section("gym defaults");

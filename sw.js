@@ -10,7 +10,7 @@
    updates the matching stamp in every script; tests/static-test.js checks
    they agree. */
 
-var VERSION = "milo-v21";
+var VERSION = "milo-v22";
 var ASSETS = [
   ".",
   "index.html",
@@ -117,6 +117,20 @@ self.addEventListener("activate", function (e) {
     caches.keys().then(function (keys) {
       return Promise.all(keys.filter(ownedOldCache).map(function (k) { return caches.delete(k); }));
     }).then(function () { return self.clients.claim(); })
+  );
+});
+
+// Tapping the "Rest over" notification brings the open app to the front
+// (or opens it), instead of doing nothing.
+self.addEventListener("notificationclick", function (e) {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (wins) {
+      for (var i = 0; i < wins.length; i++) {
+        if (wins[i].url.indexOf(SCOPE) === 0 && wins[i].focus) return wins[i].focus();
+      }
+      return self.clients.openWindow ? self.clients.openWindow(SCOPE) : null;
+    })
   );
 });
 

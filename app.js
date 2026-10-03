@@ -23,7 +23,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v21";
+  var BUILD = "milo-v22";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -640,6 +640,7 @@
   function beep() {
     try {
       if (!audioCtx) return;
+      if (audioCtx.state === "suspended" || audioCtx.state === "interrupted") audioCtx.resume();
       var o = audioCtx.createOscillator(), g = audioCtx.createGain();
       o.type = "sine"; o.frequency.value = 880;
       o.connect(g); g.connect(audioCtx.destination);
@@ -652,6 +653,47 @@
   }
   function vibrate(pat) { try { if (navigator.vibrate) navigator.vibrate(pat); } catch (e) { /* ignore */ } }
 
+  /* A notification when the rest ends (Settings). It is the one way a web
+     app can make an iPhone buzz: iPhones give web pages no vibration at all,
+     and the beep above is muted whenever the phone is on silent. It can only
+     fire while Milo is open with the screen on — nothing runs once the phone
+     locks or another app is in front. Kept per device, like the permission. */
+  var REST_NOTIFY_KEY = "milo.restNotify";
+  var REST_NOTE_TITLE = "Rest over";
+  function canNotify() {
+    return typeof Notification !== "undefined" && typeof Notification.requestPermission === "function" && !!navigator.serviceWorker;
+  }
+  function notifyState() { try { return Notification.permission; } catch (e) { return "denied"; } }
+  function restNotifyOn() { return canNotify() && notifyState() === "granted" && flag(REST_NOTIFY_KEY) === "on"; }
+  // iPhones keep every notification in Notification Center (they ignore
+  // `tag`), so old ones are taken away: a while after the newest was shown,
+  // when the next rest starts, and when the app opens. Never just before
+  // showing one — the browser could then close the new one with the old.
+  var restNoteTimer = null;
+  function clearRestNotifications(reg) {
+    if (!reg || !reg.getNotifications) return;
+    reg.getNotifications().then(function (list) {
+      list.forEach(function (n) { if (n.title === REST_NOTE_TITLE) n.close(); });
+    }).catch(function () { /* nothing to clear */ });
+  }
+  // Also after the option was switched off: what it left behind still goes.
+  function clearOldRestNotifications() {
+    if (!canNotify() || notifyState() !== "granted") return;
+    navigator.serviceWorker.ready.then(clearRestNotifications).catch(function () { /* nothing to clear */ });
+  }
+  function showRestNotification(body) {
+    if (!canNotify() || notifyState() !== "granted") return;
+    navigator.serviceWorker.ready.then(function (reg) {
+      if (!reg.showNotification) return;
+      // Never `silent`: the sound and the buzz are the whole point.
+      return reg.showNotification(REST_NOTE_TITLE, { body: body, icon: "icons/icon-192.png", tag: "milo-rest", renotify: true })
+        .then(function () {
+          clearTimeout(restNoteTimer);
+          restNoteTimer = setTimeout(function () { clearRestNotifications(reg); }, 10000);
+        });
+    }).catch(function () { /* blocked or unsupported: the pill still says it */ });
+  }
+
   // opts.gym: started by ticking a gym set (restGym); it doesn't change the
   // skill-session rest you last picked. The end time is kept per device, so
   // a reload or a swiped-away app comes back to the same countdown.
@@ -661,6 +703,8 @@
     if (!(opts && opts.gym) && state.settings.restSeconds !== seconds) { setPref("restSeconds", seconds); saveState(); }
     try { localStorage.setItem(REST_KEY, String(restEnd)); } catch (e) { /* best effort */ }
     closeRestMenu();
+    clearTimeout(restNoteTimer);
+    clearOldRestNotifications();
     var sr = $("#sr-live"); if (sr) sr.textContent = ""; // reset so the next "complete" re-announces
     ensureAudio();
     var pill = $("#restpill");
@@ -684,8 +728,14 @@
       pill.classList.add("done");
       label.textContent = "Rest done";
       var sr = $("#sr-live"); if (sr) sr.textContent = "Rest complete";
-      beep(); vibrate([120, 60, 120]);
-      setTimeout(function () { if (pill.classList.contains("done")) hideRestPill(); }, 4000);
+      // Only at the moment itself: a rest that ended while the app was away
+      // (timers stop then) must not beep or buzz minutes later, on coming
+      // back. The green pill still says it.
+      if (nowMs() - restEnd < 3000) {
+        beep(); vibrate([120, 60, 120]);
+        if (restNotifyOn()) showRestNotification("Time for your next set.");
+      }
+      setTimeout(function () { if (pill.classList.contains("done")) hideRestPill(); }, 6000);
       return;
     }
     label.textContent = "Rest " + fmtTime(remain);
@@ -751,7 +801,10 @@
   function updateWakeLock() {
     if (!navigator.wakeLock) return;
     var top = uiStack.length ? uiStack[uiStack.length - 1] : null;
-    var want = !!state.settings.keepAwake && !document.hidden && (!!restInterval || (!!top && top.t === "gym"));
+    // With the rest notification on, the screen also stays on for the rest
+    // itself: once the phone locks, nothing runs and nothing could be sent.
+    var resting = !!restInterval;
+    var want = !document.hidden && ((!!state.settings.keepAwake && (resting || (!!top && top.t === "gym"))) || (resting && restNotifyOn()));
     if (want && !wakeLock && !wakeAsking) {
       wakeAsking = true;
       navigator.wakeLock.request("screen").then(function (lock) {
@@ -2186,7 +2239,7 @@
   }
   function restSettingsHTML() {
     var g = state.settings.restGym;
-    var chips = [60, 90, 120, 180, 240].map(function (sec) {
+    var chips = [50, 60, 90, 120, 180, 240].map(function (sec) {
       return '<button type="button" class="chip' + (g === sec ? " sel" : "") + '" data-restgym="' + sec + '" aria-pressed="' + (g === sec) + '">' + fmtTime(sec) + "</button>";
     }).join("");
     return "<h4>Rest timer</h4>" +
@@ -2194,7 +2247,28 @@
       '<div class="chips" role="group" aria-label="Rest between gym sets">' + chips + "</div>" +
       '<label class="exchk"><input type="checkbox" id="autoRestChk"' + (state.settings.autoRest ? " checked" : "") + "> Start it when I tick a gym set</label>" +
       (navigator.wakeLock ? '<label class="exchk"><input type="checkbox" id="keepAwakeChk"' + (state.settings.keepAwake ? " checked" : "") +
-        "> Keep the screen on while an exercise is open or a rest runs</label>" : "");
+        "> Keep the screen on while an exercise is open or a rest runs</label>" : "") +
+      restNotifyHTML();
+  }
+  // Only where the browser can show notifications: on an iPhone that means
+  // Milo opened from its Home Screen icon, not a Safari tab.
+  function restNotifyHTML() {
+    if (!canNotify()) return "";
+    var blocked = notifyState() === "denied", on = restNotifyOn();
+    var iphone = navigator.standalone === true;   // the Home Screen icon: the one place an iPhone allows them
+    return '<label class="exchk"><input type="checkbox" id="restNotifyChk"' + (on ? " checked" : "") +
+      "> Send a notification when the rest ends</label>" +
+      '<p class="hint">' + (blocked
+        ? (iphone ? "Notifications are blocked for Milo on this iPhone. Allow them in Settings &#8594; Notifications &#8594; Milo, then tick this again."
+          : "Notifications are blocked for this site. Allow them in the browser (the icon to the left of the address), then tick this again.")
+        : "iPhones give web apps no vibration, and the beep is muted on silent. A notification is the only thing that can buzz, " +
+          "and whether it does is up to the phone&#8217;s own settings, so send a test. " +
+          "It only works while Milo is open on screen: not once the phone locks or another app is in front" +
+          (navigator.wakeLock ? ", so Milo keeps the screen on during the rest." : ".")) + "</p>" +
+      (on ? '<div class="btnrow"><button class="btn" id="restNotifyTest" type="button">Send a test now</button></div>' +
+        '<p class="hint">' + (iphone
+          ? "No banner or buzz? In the iPhone&#8217;s Settings &#8594; Notifications &#8594; Milo, allow banners and sounds; a Focus can also hold it back."
+          : "No banner? Check that this browser is allowed to show notifications.") + "</p>" : "");
   }
   function wireRestSettings(sheet) {
     sheet.querySelectorAll("[data-restgym]").forEach(function (b) {
@@ -2209,6 +2283,37 @@
     if (ar) ar.addEventListener("change", function () { setPref("autoRest", ar.checked); saveState(); });
     var ka = $("#keepAwakeChk", sheet);
     if (ka) ka.addEventListener("change", function () { setPref("keepAwake", ka.checked); saveState(); updateWakeLock(); });
+    var rn = $("#restNotifyChk", sheet);
+    if (rn) rn.addEventListener("change", function () {
+      if (!rn.checked) { setFlag(REST_NOTIFY_KEY, "off"); updateWakeLock(); renderSheet(); focusIn($("#sheet"), "#restNotifyChk"); return; }
+      // Asking has to be the first thing the tap does: the browser only
+      // shows its question in direct response to one.
+      var settled = false;
+      var done = function (answer) {
+        if (settled) return;
+        settled = true;
+        if ((answer || notifyState()) !== "granted") {
+          toast("Milo isn't allowed to send notifications on this device");
+        } else {
+          setFlag(REST_NOTIFY_KEY, "on");
+          updateWakeLock();
+          showRestNotification("This is what the end of a rest looks like.");
+          toast("On ✓ A test notification is on its way");
+        }
+        // The answer can come late (a laptop browser asks in a bubble that
+        // doesn't block the page): only redraw Settings if it is still on top.
+        var top = uiStack[uiStack.length - 1];
+        if (top && top.t === "settings") { renderSheet(); focusIn($("#sheet"), "#restNotifyChk"); }
+      };
+      var asked;
+      try { asked = Notification.requestPermission(done); } catch (e) { done("denied"); return; }
+      if (asked && typeof asked.then === "function") asked.then(done, function () { done("denied"); });
+    });
+    var rt = $("#restNotifyTest", sheet);
+    if (rt) rt.addEventListener("click", function () {
+      showRestNotification("This is what the end of a rest looks like.");
+      toast("Test sent");
+    });
   }
 
   function volHintText() {
@@ -2346,9 +2451,22 @@
       if (e.kind !== "gym" || seen[e.exId]) continue;
       seen[e.exId] = true;
       var ex = TRAINING.exercise(e.exId);
-      if (ex && !ex.del) out.push(ex);
+      if (ex && !ex.del && !ex.retired) out.push(ex);
     }
     return out;
+  }
+
+  // What the picker's search compares: lowercase, without spaces, hyphens
+  // or punctuation, so "pull up", "pull-up" and "pullup" all find "Pull-up".
+  function searchKey(text) {
+    return String(text).toLowerCase().replace(/[\s\-\u2010-\u2015_.,;:()'\u2019\/]+/g, "");
+  }
+
+  // The same, minus one final "s" per word, so "pull ups", "pushups" and
+  // "leg lifts" find Pull-up, Push-up and Leg lift.
+  function searchStem(text) {
+    return String(text).toLowerCase().split(/[\s\-\u2010-\u2015_.,;:()'\u2019\/]+/)
+      .map(function (w) { return w.replace(/s$/, ""); }).join("");
   }
 
   function exRowHTML(ex) {
@@ -2356,7 +2474,7 @@
     var when = last ? dayLabel(last.ts) : "";
     var sub = last ? (when === "Today" ? "Today" : "Last " + esc(when)) + ": " + esc(setsText(ex, last.sets, last.kg))
       : esc((EQUIP_NAME[ex.equip] || ex.equip) + " · " + ex.lo + "–" + ex.hi + " " + repUnit(ex));
-    return '<button class="librow exrow" type="button" data-ex="' + esc(ex.id) + '" data-name="' + esc(ex.name.toLowerCase()) + '" style="--area:' + exColor(ex) + '">' +
+    return '<button class="librow exrow" type="button" data-ex="' + esc(ex.id) + '" data-name="' + esc(searchKey(ex.name)) + '" data-stem="' + esc(searchStem(ex.name)) + '" style="--area:' + exColor(ex) + '">' +
       '<span class="libinfo"><span class="libname">' + esc(ex.name) + (ex.custom ? ' <span class="exmine">yours</span>' : "") + "</span>" +
       '<span class="libsub">' + sub + '</span></span><span class="chev" aria-hidden="true">&#8250;</span></button>';
   }
@@ -2386,12 +2504,12 @@
   function wireGymPick(sheet) {
     var box = $("#gymSearch", sheet);
     function filter() {
-      var q = box.value.trim().toLowerCase();
+      var q = searchKey(box.value), qs = searchStem(box.value);
       var any = false;
       sheet.querySelectorAll(".exsect").forEach(function (sec) {
         var shown = 0;
         sec.querySelectorAll(".exrow").forEach(function (r) {
-          var hit = !q || r.getAttribute("data-name").indexOf(q) !== -1;
+          var hit = !q || r.getAttribute("data-name").indexOf(q) !== -1 || (!!qs && r.getAttribute("data-stem").indexOf(qs) !== -1);
           r.hidden = !hit;
           if (hit) shown++;
         });
@@ -3602,7 +3720,7 @@
         '<button class="removeSet" data-i="' + i + '" aria-label="Remove this ' + (timed ? "hold" : "set") + '">&#10005;</button></div>';
     }).join("");
 
-    var presets = [60, 120, 180, 300].map(function (sec) {
+    var presets = [50, 60, 120, 180, 300].map(function (sec) {
       return '<button class="restpreset" data-sec="' + sec + '">' + fmtTime(sec) + "</button>";
     }).join("");
 
@@ -4767,6 +4885,7 @@
   if (flag(WHATSNEW_KEY) === null) setFlag(WHATSNEW_KEY, untouched() ? "done" : "show");
   TRAINING.useExercises(state.exercises);
   resumeRest();
+  clearOldRestNotifications();
   showTab(initialTab());
   tryImportFromHash();
   tryPairFromHash();
