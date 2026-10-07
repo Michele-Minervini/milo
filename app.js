@@ -1,7 +1,7 @@
 /* ============================================================
    Milo — app logic
    Plain JavaScript, no dependencies.
-   The stored state (data v5) is described at the top of model.js, which
+   The stored state (data v6) is described at the top of model.js, which
    also holds everything that validates, migrates and merges it. Older
    shapes migrate automatically on load. The `mts` / `pm` stamps and
    `deleted` tombstones exist only for sync: they let two devices merge
@@ -23,7 +23,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v22";
+  var BUILD = "milo-v23";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -183,7 +183,10 @@
   var readOnly = false;
 
   var RECOVER_KEY = "milo.recover";     // stored data that couldn't be read
-  var PRE_UPDATE_KEY = "milo.pre5";     // the data as it was before data v5
+  // The data as it was before the latest data version (v6). A new key per
+  // version: a copy is never replaced, so "milo.pre5" (the v4 data, on devices
+  // that had it) would otherwise block this one. That older copy is left alone.
+  var PRE_UPDATE_KEY = "milo.pre6";
 
   function loadState() {
     var raw = null;
@@ -1142,17 +1145,28 @@
     '<span><i class="lg-pace"></i>an even pace by today</span></p>';
 
   // Six fixed slots, 3 × 2, in the order of the bars: a dot's place says
-  // which group it is, not only its colour.
-  function slots(groups) {
+  // which group it is, not only its colour. Two levels: a solid dot for a
+  // group trained directly that day (direct), a ring for one that only got
+  // its sets by helping other exercises. Without `direct`, all solid.
+  function slots(groups, direct) {
     return '<span class="slots" aria-hidden="true">' + MODEL.GROUPS.map(function (g) {
-      return groups.indexOf(g) !== -1 ? '<i class="on" style="--area:' + groupColorVar(g) + '"></i>' : "<i></i>";
+      if (groups.indexOf(g) === -1) return "<i></i>";
+      var helped = !!direct && direct.indexOf(g) === -1;
+      return '<i class="on' + (helped ? " helped" : "") + '" style="--area:' + groupColorVar(g) + '"></i>';
     }).join("") + "</span>";
+  }
+  // The same in words, for a screen reader: "Shoulders; helped: Back, Arms".
+  function dotsText(groups, direct) {
+    var d = groups.filter(function (g) { return direct.indexOf(g) !== -1; }).map(groupName);
+    var h = groups.filter(function (g) { return direct.indexOf(g) === -1; }).map(groupName);
+    return d.join(", ") + (h.length ? (d.length ? "; " : "") + "helped: " + h.join(", ") : "");
   }
   function slotKeyHTML() {
     var G = MODEL.GROUPS;
     return '<div class="slot-key" aria-hidden="true">' + slots(G) +
       '<span class="sk-rows"><span>' + G.slice(0, 3).map(groupName).join(" &middot; ") + "</span><span>" +
-      G.slice(3).map(groupName).join(" &middot; ") + "</span></span></div>";
+      G.slice(3).map(groupName).join(" &middot; ") + "</span></span></div>" +
+      '<p class="slot-lv" aria-hidden="true"><span><i></i>trained directly</span><span><i class="helped"></i>only as a helper</span></p>';
   }
 
   // This week, group by group: sets, target, zone, and where an even pace
@@ -1321,9 +1335,9 @@
   function weekCardHTML(ws, now) {
     var days = TRAINING.weekStrip(state.log, now).map(function (d) {
       var hidden = '<span class="visually-hidden">' + esc(longDay(d.ts)) + (d.today ? ", today" : "") +
-        (d.groups.length ? ": " + d.groups.map(groupName).join(", ") : (d.future ? "" : (d.trained ? ": trained" : ": nothing logged"))) + "</span>";
+        (d.groups.length ? ": " + dotsText(d.groups, d.direct) : (d.future ? "" : (d.trained ? ": trained" : ": nothing logged"))) + "</span>";
       var inner = '<span class="ws-wd" aria-hidden="true">' + DOW_SHORT[new Date(d.ts).getDay()].charAt(0) + "</span>" +
-        '<span class="ws-n" aria-hidden="true">' + new Date(d.ts).getDate() + "</span>" + slots(d.groups) + hidden;
+        '<span class="ws-n" aria-hidden="true">' + new Date(d.ts).getDate() + "</span>" + slots(d.groups, d.direct) + hidden;
       var cls = "ws-day" + (d.today ? " today" : "") + (d.future ? " future" : "");
       return "<li>" + (d.trained
         ? '<button class="' + cls + '" type="button" data-day="' + d.key + '">' + inner + "</button>"
@@ -1662,7 +1676,8 @@
     return sheetHead({ title: "How the week is counted", sub: "This week &middot; " + esc(TRAINING.weekLabel(nowMs())), back: true, backLabel: "Home" }) +
       '<div class="sheet-body volinfo">' +
       "<h4>Hard sets</h4>" +
-      "<p>A hard set is a working set you finish close to your limit &mdash; two or three more reps at most. Warm-ups and easy sets don&#8217;t count.</p>" +
+      "<p>A hard set is a working set you finish close to your limit &mdash; two or three more reps at most. Warm-ups and easy sets don&#8217;t count: " +
+      "in a gym exercise every set counts unless you tap its number to make it <b>W</b>, a warm-up.</p>" +
       "<h4>Helpers count half</h4>" +
       "<p>Most exercises work one main group and get help from others. The main group gets the whole set, each helper gets &frac12;. One set of push-ups is 1 for chest, &frac12; for arms and &frac12; for shoulders.</p>" +
       "<p>A quick gym log has only the main groups, so helpers get a smaller share: &frac14; per set. Four chest sets also add 1 to arms and 1 to shoulders.</p>" +
@@ -2003,12 +2018,13 @@
       return "<tr>" + row.map(function (c) {
         if (!c.inMonth) return "<td></td>";
         var isToday = c.key === todayKey, future = c.key > todayKey;
-        var dots = future ? [] : TRAINING.dayGroups(state.log, c.ts);
+        var dd = future ? { groups: [], direct: [] } : TRAINING.dayDots(state.log, c.ts);
+        var dots = dd.groups;
         var trained = !future && state.log.some(function (e) { return isTraining(e) && dateStr(e.ts) === c.key; });
         var cls = "cal-cell" + (isToday ? " today" : "") + (future ? " future" : "") + (dots.length ? " has" : "");
         var hidden = (isToday || trained) ? '<span class="visually-hidden">' + (isToday ? ", today" : "") +
-          (dots.length ? ": " + dots.map(groupName).join(", ") : (trained ? ": trained" : "")) + "</span>" : "";
-        var inner = '<span class="cal-n">' + c.day + "</span>" + slots(dots) + hidden;
+          (dots.length ? ": " + dotsText(dots, dd.direct) : (trained ? ": trained" : "")) + "</span>" : "";
+        var inner = '<span class="cal-n">' + c.day + "</span>" + slots(dots, dd.direct) + hidden;
         return "<td>" + (trained ? '<button class="' + cls + '" type="button" data-day="' + c.key + '">' + inner + "</button>"
           : '<span class="' + cls + '">' + inner + "</span>") + "</td>";
       }).join("") + "</tr>";
@@ -2428,16 +2444,26 @@
     if (one) return sets.join(", ") + (ex && ex.timed ? " sec" : "") + " × " + fmtW(kg[0]) + suffix;
     return sets.map(function (r, i) { return r + " × " + fmtW(kg[i]); }).join(", ") + suffix;
   }
+  // The counted sets of a gym entry, and how many warm-ups it has besides.
+  // only: every set is a warm-up (marked by hand) — then `sets` lists them.
+  function countedSets(e) {
+    var work = TRAINING.workingSets(e), kgs = Array.isArray(e.kg) ? e.kg : [];
+    var ws = [], wk = [], warm = 0;
+    e.sets.forEach(function (r, i) { if (work[i]) { ws.push(r); wk.push(kgs[i] || 0); } else if (r > 0) warm++; });
+    if (ws.length) return { sets: ws, kg: wk, warm: warm, only: false };
+    return { sets: e.sets.slice(), kg: e.sets.map(function (r, i) { return kgs[i] || 0; }), warm: 0, only: warm > 0 && Array.isArray(e.warm) };
+  }
+  function warmNote(n) { return n ? " (+" + n + " warm-up" + (n === 1 ? "" : "s") + ")" : ""; }
   // A logged gym entry in one line: "3 sets (+1 warm-up): 8, 8, 7 × 60 kg".
   function gymEntryText(e) {
-    var ex = TRAINING.exercise(e.exId);
-    var work = TRAINING.workingSets(e);
-    var ws = [], wk = [], warm = 0;
-    e.sets.forEach(function (r, i) { if (work[i]) { ws.push(r); wk.push(e.kg[i] || 0); } else if (r > 0) warm++; });
-    if (!ws.length) { ws = e.sets.slice(); wk = e.kg.slice(); warm = 0; }
-    var n = ws.length;
-    return n + (ex && ex.timed ? (n === 1 ? " hold" : " holds") : (n === 1 ? " set" : " sets")) +
-      (warm ? " (+" + warm + " warm-up" + (warm === 1 ? "" : "s") + ")" : "") + ": " + setsText(ex, ws, wk);
+    var ex = TRAINING.exercise(e.exId), c = countedSets(e), n = c.sets.length;
+    if (c.only) return "Warm-ups only: " + setsText(ex, c.sets, c.kg);
+    return n + (ex && ex.timed ? (n === 1 ? " hold" : " holds") : (n === 1 ? " set" : " sets")) + warmNote(c.warm) + ": " + setsText(ex, c.sets, c.kg);
+  }
+  // The same for "Last time" lines: "8, 8, 7 × 60 kg (+1 warm-up)".
+  function lastSetsText(ex, e) {
+    var c = countedSets(e);
+    return (c.only ? "warm-ups only, " : "") + setsText(ex, c.sets, c.kg) + warmNote(c.warm);
   }
 
   /* ---- Picker ---- */
@@ -2472,7 +2498,7 @@
   function exRowHTML(ex) {
     var last = TRAINING.lastSession(state.log, ex.id, {});
     var when = last ? dayLabel(last.ts) : "";
-    var sub = last ? (when === "Today" ? "Today" : "Last " + esc(when)) + ": " + esc(setsText(ex, last.sets, last.kg))
+    var sub = last ? (when === "Today" ? "Today" : "Last " + esc(when)) + ": " + esc(lastSetsText(ex, last))
       : esc((EQUIP_NAME[ex.equip] || ex.equip) + " · " + ex.lo + "–" + ex.hi + " " + repUnit(ex));
     return '<button class="librow exrow" type="button" data-ex="' + esc(ex.id) + '" data-name="' + esc(searchKey(ex.name)) + '" data-stem="' + esc(searchStem(ex.name)) + '" style="--area:' + exColor(ex) + '">' +
       '<span class="libinfo"><span class="libname">' + esc(ex.name) + (ex.custom ? ' <span class="exmine">yours</span>' : "") + "</span>" +
@@ -2532,9 +2558,15 @@
      exercise's history on top of today's workout never touches today's
      rows. gymDraft is the draft of the gym view on top of the stack
      (renderSheet sets it). Per-device drafts of typed-but-unticked sets are
-     kept per exercise, for today only. */
+     kept per exercise, for today only.
 
-  // milo.gymDraft = { date: today, byEx: { exId: { entryId, rows: [{ kg, reps }], note } } }
+     A row is { kg, reps, done, warm, savedKg, savedReps, savedWarm }. `warm`
+     is the W mark: a warm-up, logged but not counted. It lives ON THE ROW and
+     the stored marks are rebuilt from the ticked rows together with their
+     reps and kg, so adding, removing or unticking a set can't misalign them.
+     A new row is a counted set; only a tap on its label makes it a warm-up. */
+
+  // milo.gymDraft = { date: today, byEx: { exId: { entryId, rows: [{ kg, reps, warm }], note } } }
   function readGymDrafts() {
     var today = quickDays().today, box = null;
     try { box = JSON.parse(localStorage.getItem(GYM_DRAFT_KEY) || "null"); } catch (e) { box = null; }
@@ -2563,7 +2595,7 @@
     var d = gymDraft;
     if (!d || d.date !== quickDays().today) return;
     var rows = d.rows.filter(function (r) { return !r.done && r.reps !== ""; })
-      .map(function (r) { return { kg: r.kg, reps: r.reps }; });
+      .map(function (r) { return { kg: r.kg, reps: r.reps, warm: !!r.warm }; });
     writeGymDraftSlot(d.exId, rows.length || d.note || d.entryId ? { entryId: d.entryId, rows: rows, note: d.note || "" } : null);
   }
 
@@ -2571,9 +2603,15 @@
     try { return TRAINING.suggest(exId, state.log, nowMs(), { exclude: excludeId }); } catch (e) { return null; }
   }
 
-  function doneRow(ex, kg, reps) {
+  function doneRow(ex, kg, reps, warm) {
     var k = hasKg(ex) ? String(fmtW(kg || 0)) : "", r = String(reps);
-    return { kg: k, reps: r, done: true, savedKg: k, savedReps: r };
+    return { kg: k, reps: r, done: true, warm: !!warm, savedKg: k, savedReps: r, savedWarm: !!warm };
+  }
+  // A logged entry as ticked rows. Its warm-up marks, or — for an entry from
+  // before the marks — what Milo's old rule made of it, as the starting point.
+  function rowsFromEntry(ex, e) {
+    var marks = TRAINING.warmups(e);
+    return e.sets.map(function (r, i) { return doneRow(ex, e.kg[i], r, marks[i]); });
   }
 
   // This exercise's entry on a day, if there is one (the latest).
@@ -2594,7 +2632,7 @@
       d.entryId = entry.id;
       d.date = dateStr(entry.ts);
       d.note = entry.note || "";
-      d.rows = entry.sets.map(function (r, i) { return doneRow(ex, entry.kg[i], r); });
+      d.rows = rowsFromEntry(ex, entry);
     } else {
       // Carry on where you left off today: the ticked sets already in today's
       // entry for this exercise, then what was typed but not ticked.
@@ -2604,28 +2642,40 @@
       if (cont) {
         d.entryId = cont.id;
         d.note = cont.note || "";
-        d.rows = cont.sets.map(function (r, i) { return doneRow(ex, cont.kg[i], r); });
+        d.rows = rowsFromEntry(ex, cont);
       }
       if (draft) {
-        (draft.rows || []).forEach(function (r) { d.rows.push({ kg: String(r.kg || ""), reps: String(r.reps || ""), done: false }); });
+        (draft.rows || []).forEach(function (r) { d.rows.push({ kg: String(r.kg || ""), reps: String(r.reps || ""), done: false, warm: !!r.warm }); });
         if (draft.note) d.note = draft.note;
       }
       // One empty set ready for the next one, at the last weight.
       if (cont && !d.rows.some(function (r) { return !r.done; })) {
-        d.rows.push({ kg: d.rows.length ? d.rows[d.rows.length - 1].kg : "", reps: "", done: false });
+        d.rows.push({ kg: d.rows.length ? d.rows[d.rows.length - 1].kg : "", reps: "", done: false, warm: false });
       }
     }
     if (!d.rows.length) {
       var sg = gymSuggestion(exId, null);
       var n = sg && sg.sets ? sg.sets : 3;
       var kg = sg && sg.kg ? String(fmtW(sg.kg)) : "";
-      for (var i = 0; i < n; i++) d.rows.push({ kg: hasKg(ex) ? kg : "", reps: "", done: false });
+      for (var i = 0; i < n; i++) d.rows.push({ kg: hasKg(ex) ? kg : "", reps: "", done: false, warm: false });
     }
     d.pick = d.date !== k.today && d.date !== k.yesterday;
     var v = { t: "gym", x: exId, g: d };
     if (sameView(v, uiStack[uiStack.length - 1])) { renderSheet(); return; }   // a double tap
     uiStack.push(v);
     renderSheet();
+  }
+
+  // From an exercise's history: if that entry's sheet is already open further
+  // down the stack, go back to it rather than open a second sheet on the same
+  // entry — the one underneath would keep its old rows and, on its next save,
+  // undo what the second one changed (a warm-up mark, a rep).
+  function openGymEntry(exId, id) {
+    for (var i = uiStack.length - 2; i >= 0; i--) {
+      var v = uiStack[i];
+      if (v.t === "gym" && v.g && v.g.entryId === id) { uiStack.length = i + 1; renderSheet(); return; }
+    }
+    openGym(exId, id);
   }
 
   function suggestionHTML(ex, sg) {
@@ -2677,20 +2727,22 @@
     // A suggestion is for today's workout; on a past day's entry it would be about the wrong day.
     var sg = d.date === k.today ? gymSuggestion(d.exId, d.entryId) : null;
     var targets = sg && sg.targets ? sg.targets : [];
-    var work = gymRowsWorking();
+    // The suggested reps are for counted sets: the k-th row that isn't a
+    // warm-up gets the k-th target; a warm-up row gets none.
+    var counted = 0;
     var rows = d.rows.map(function (r, i) {
-      var warm = r.reps !== "" && !work[i];
+      var warm = !!r.warm;
+      var target = warm ? null : targets[counted++];
       return '<li class="gset' + (r.done ? " done" : "") + (warm ? " warm" : "") + '" data-i="' + i + '">' +
-        '<span class="gnum" aria-hidden="true">' + (warm ? "W" : i + 1) + "</span>" +
+        '<button type="button" class="gnum" aria-pressed="' + warm + '" aria-label="Set ' + (i + 1) + ': warm-up, not counted"><span class="gchip">' + (warm ? "W" : i + 1) + "</span></button>" +
         (hasKg(ex)
           ? '<span class="stepper gkg"><button type="button" class="stepbtn" data-kg="-1" aria-label="Less weight, set ' + (i + 1) + '">&#8722;</button>' +
             '<input class="stepval kgval" type="text" inputmode="decimal" value="' + esc(r.kg) + '" placeholder="kg" aria-label="Weight in kg, set ' + (i + 1) + '">' +
             '<button type="button" class="stepbtn" data-kg="1" aria-label="More weight, set ' + (i + 1) + '">&#43;</button></span>'
           : "") +
-        '<input class="stepval repval" type="number" inputmode="numeric" min="1" max="3600" value="' + esc(r.reps) + '" placeholder="' + (targets[i] != null ? targets[i] : "") + '" aria-label="' + (ex && ex.timed ? "Seconds" : "Reps") + ", set " + (i + 1) + '">' +
+        '<input class="stepval repval" type="number" inputmode="numeric" min="1" max="3600" value="' + esc(r.reps) + '" placeholder="' + (target != null ? target : "") + '" aria-label="' + (ex && ex.timed ? "Seconds" : "Reps") + ", set " + (i + 1) + '">' +
         '<span class="gunit" aria-hidden="true">' + repUnit(ex) + "</span>" +
-        '<button type="button" class="gtick" aria-pressed="' + r.done + '" aria-label="Set ' + (i + 1) + ' done">&#10003;</button>' +
-        '<span class="visually-hidden gwarm">' + (warm ? "(warm-up)" : "") + "</span></li>";
+        '<button type="button" class="gtick" aria-pressed="' + r.done + '" aria-label="Set ' + (i + 1) + ' done">&#10003;</button></li>';
     }).join("");
     return sheetHead({
       title: '<span class="swatch" style="--area:' + exColor(ex) + '"></span>' + esc(exName(d.exId)),
@@ -2699,11 +2751,12 @@
       '<div class="sheet-body quickpane gympane' + (hasKg(ex) ? "" : " gpane-bw") + '" style="--area:' + exColor(ex) + '">' +
       '<div class="chips" role="group" aria-label="Day">' + chip("today", "Today") + chip("yesterday", "Yesterday") + chip("pick", "Pick a day") + "</div>" +
       (mode === "pick" ? '<label class="visually-hidden" for="gymDate">Day you trained</label><input type="date" id="gymDate" class="qdate" value="' + esc(d.date) + '" min="2000-01-01" max="' + k.today + '">' : "") +
-      (last ? '<p class="glast"><b>Last time</b> &middot; ' + esc(dayLabel(last.ts)) + ": " + esc(setsText(ex, last.sets, last.kg)) + "</p>" : "") +
+      (last ? '<p class="glast"><b>Last time</b> &middot; ' + esc(dayLabel(last.ts)) + ": " + esc(lastSetsText(ex, last)) + "</p>" : "") +
       suggestionHTML(ex, sg) +
       '<ol class="gsets" aria-label="Sets">' + rows + "</ol>" +
       '<p class="hint gtip">Tick &#10003; each set as you finish it: it&#8217;s saved straight away' +
-      (targets.length ? ", and an empty " + repUnit(ex) + " box takes the suggested number" : "") + ".</p>" +
+      (targets.length ? ", and an empty " + repUnit(ex) + " box takes the suggested number" : "") + ". " +
+      "Tap a set&#8217;s number to make it <b>W</b>, a warm-up: it stays in the log but isn&#8217;t counted.</p>" +
       '<div class="btnrow"><button class="btn" id="gymAddSet" type="button">&#65291; Add set</button>' +
       (d.rows.length > 1 ? '<button class="btn" id="gymRemoveSet" type="button">Remove last set</button>' : "") + "</div>" +
       "<h4>Note (optional)</h4>" +
@@ -2712,32 +2765,6 @@
       "</div>" +
       '<div class="sheet-foot gymfoot"><button type="button" class="btn wide" id="gymDone">Done</button>' +
       '<button type="button" class="btn primary wide" id="gymNext">Save &#8594; next exercise</button></div>';
-  }
-
-  // Which rows are working sets (the rest are warm-ups), from what's typed.
-  function gymRowsWorking() {
-    var d = gymDraft, sets = [], kg = [], idx = [];
-    d.rows.forEach(function (r, i) {
-      var reps = Math.round(Number(r.reps));
-      if (r.reps === "" || !isFinite(reps) || reps <= 0) return;
-      sets.push(reps); kg.push(parseKgInput(r.kg)); idx.push(i);
-    });
-    var flags = sets.length ? TRAINING.workingSets({ kind: "gym", exId: d.exId, sets: sets, kg: kg }) : [];
-    var out = d.rows.map(function () { return true; });
-    idx.forEach(function (i, j) { out[i] = !!flags[j]; });
-    return out;
-  }
-  // The warm-up marks, redrawn in place (no re-render: that would swallow the next tap).
-  function paintGymRows(sheet) {
-    var work = gymRowsWorking();
-    sheet.querySelectorAll(".gset").forEach(function (li) {
-      var i = Number(li.getAttribute("data-i")), r = gymDraft.rows[i];
-      if (!r) return;
-      var warm = r.reps !== "" && !work[i];
-      li.classList.toggle("warm", warm);
-      $(".gnum", li).textContent = warm ? "W" : String(i + 1);
-      $(".gwarm", li).textContent = warm ? "(warm-up)" : "";
-    });
   }
 
   function parseKgInput(v) {
@@ -2770,12 +2797,13 @@
   // written (or re-stamped) when the entry wouldn't change — a stamp without
   // a change could undo an edit made meanwhile on another device.
   function commitGym() {
-    var d = gymDraft, sets = [], kg = [];
+    var d = gymDraft, sets = [], kg = [], warm = [];
     d.rows.forEach(function (r) {
       if (!r.done) return;
       var reps = Math.round(Number(r.reps));
       sets.push(isFinite(reps) && reps >= 0 ? Math.min(3600, reps) : 0);
       kg.push(parseKgInput(r.kg));
+      warm.push(r.warm ? 1 : 0);
     });
     var existing = d.entryId ? entryById(d.entryId) : null;
     if (d.entryId && !existing && !d.dirty) { d.entryId = null; return true; }   // deleted elsewhere; not ours to bring back
@@ -2785,7 +2813,7 @@
       return true;
     }
     var raw = { id: d.entryId || genId(), ts: gymEntryTs(), kind: "gym", exId: d.exId, sets: sets, kg: kg,
-      note: String(d.note || "").slice(0, 280), mts: existing ? existing.mts : 0 };
+      note: String(d.note || "").slice(0, 280), mts: existing ? existing.mts : 0, warm: warm };
     var entry = MODEL.sanitizeLogEntry(raw);
     if (!entry) { toast("Couldn't save that set"); return false; }
     // What was saved, back in the boxes (22.3 is stored as 22.25).
@@ -2794,10 +2822,22 @@
       if (!r.done) return;
       r.kg = hasKg(ex) ? String(fmtW(entry.kg[j])) : "";
       r.reps = String(entry.sets[j]);
-      r.savedKg = r.kg; r.savedReps = r.reps;
+      r.savedKg = r.kg; r.savedReps = r.reps; r.savedWarm = !!r.warm;
       j++;
     });
-    if (existing && JSON.stringify(entry) === JSON.stringify(existing)) { saveGymDraft(); return true; }
+    if (existing) {
+      var same = JSON.stringify(entry) === JSON.stringify(existing);
+      // An entry from before the marks: untouched means the same sets, kg,
+      // day and note AND marks that still say what the old rule says. Then
+      // nothing is written. Any real change writes the marks along, so from
+      // then on nothing about that entry changes by itself.
+      if (!same && !Array.isArray(existing.warm)) {
+        var bare = MODEL.sanitizeLogEntry(Object.assign({}, raw, { warm: null }));
+        same = !!bare && JSON.stringify(bare) === JSON.stringify(existing) &&
+          JSON.stringify(entry.warm) === JSON.stringify(TRAINING.warmups(existing).map(function (w) { return w ? 1 : 0; }));
+      }
+      if (same) { saveGymDraft(); return true; }
+    }
     entry.mts = MODEL.stamp(existing ? existing.mts : 0);
     if (existing) state.log[state.log.indexOf(existing)] = entry;
     else state.log.push(entry);
@@ -2819,7 +2859,7 @@
     if (!e) return;
     var ex = TRAINING.exercise(d.exId);
     d.entryId = e.id;
-    d.rows = e.sets.map(function (r, i) { return doneRow(ex, e.kg[i], r); }).concat(d.rows.filter(function (r) { return !r.done; }));
+    d.rows = rowsFromEntry(ex, e).concat(d.rows.filter(function (r) { return !r.done; }));
     if (!d.note) d.note = e.note || "";
   }
 
@@ -2828,7 +2868,7 @@
     var top = uiStack[uiStack.length - 1];
     if (!top || top.t !== "gym" || !gymDraft) return;
     readGymInputs($("#sheet"));
-    var changed = gymDraft.rows.some(function (r) { return r.done && (r.kg !== r.savedKg || r.reps !== r.savedReps); });
+    var changed = gymDraft.rows.some(function (r) { return r.done && (r.kg !== r.savedKg || r.reps !== r.savedReps || !!r.warm !== !!r.savedWarm); });
     if (changed && gymRowsValid(true)) commitGym();
     saveGymDraft();
   }
@@ -2891,7 +2931,6 @@
           r.kg = String(fmtW(next));
           kgIn.value = r.kg;
           if (r.done) { d.dirty = true; commitGym(); } else saveGymDraft();
-          paintGymRows(sheet);
         });
       });
       [kgIn, repIn].forEach(function (inp) {
@@ -2903,8 +2942,21 @@
             if (kgIn) kgIn.value = r.kg;
             if (repIn) repIn.value = r.reps;
           } else saveGymDraft();
-          paintGymRows(sheet);
         });
+      });
+      // The label: this set is a warm-up (W) or a counted set. A ticked row
+      // is saved at once; an unticked one keeps its mark in today's draft.
+      // It never starts the rest timer: only a tick does.
+      var numBtn = $(".gnum", li);
+      if (numBtn) numBtn.addEventListener("click", function () {
+        readGymInputs(sheet);
+        r.warm = !r.warm;
+        if (r.done) {
+          if (gymRowsValid(false)) { d.dirty = true; commitGym(); }
+          else r.warm = !!r.savedWarm;
+        } else saveGymDraft();
+        renderSheet();
+        focusIn($("#sheet"), '.gset[data-i="' + i + '"] .gnum');
       });
       tick.addEventListener("click", function () {
         readGymInputs(sheet);
@@ -2933,7 +2985,7 @@
       readGymInputs(sheet);
       var lastRow = d.rows[d.rows.length - 1];
       if (d.rows.length >= 30) { toast("That's the most sets one entry can hold"); return; }
-      d.rows.push({ kg: lastRow ? lastRow.kg : "", reps: "", done: false });
+      d.rows.push({ kg: lastRow ? lastRow.kg : "", reps: "", done: false, warm: false });
       saveGymDraft();
       renderSheet();
       focusIn($("#sheet"), '.gset[data-i="' + (d.rows.length - 1) + '"] .repval');
@@ -3092,7 +3144,7 @@
     var noteIn = $("#exNote", sheet);
     if (noteIn) noteIn.addEventListener("change", function () { saveExerciseField(exId, { note: noteIn.value.slice(0, 80) }); });
     sheet.querySelectorAll("[data-edit]").forEach(function (b) {
-      b.addEventListener("click", function () { openGym(exId, b.getAttribute("data-edit")); });
+      b.addEventListener("click", function () { openGymEntry(exId, b.getAttribute("data-edit")); });
     });
     var ed = $("#exEditBtn", sheet);
     if (ed) ed.addEventListener("click", function () { openExForm(exId); });
@@ -3970,14 +4022,14 @@
       MODEL.GROUPS.forEach(function (g) { if (w[g]) acc[g] = (acc[g] || 0) + w[g]; });
     });
     var line = MODEL.GROUPS.filter(function (g) { return acc[g] > 0; }).map(function (g) { return esc(groupName(g)) + " " + esc(fmtSets(acc[g])); }).join(" &middot; ");
-    var dots = TRAINING.dayGroups(state.log, ts);
+    var dd = TRAINING.dayDots(state.log, ts), dots = dd.groups;
     return sheetHead({
       title: ico("&#128197;") + esc(dayLabel(ts)),
       sub: es.length ? es.length + (es.length === 1 ? " entry" : " entries") + " &middot; " + esc(longDay(ts)) : esc(longDay(ts))
     }) +
       '<div class="sheet-body history">' +
       (line ? '<p class="dayline"><b>Hard sets that day:</b> ' + line + "</p>" : "") +
-      (dots.length ? '<div class="dayslots">' + slots(dots) + "<span>Dots: the groups with 1 hard set or more.</span></div>" : "") +
+      (dots.length ? '<div class="dayslots">' + slots(dots, dd.direct) + "<span>Dots: the groups with 1 hard set or more. Solid: trained directly. Ring: only as a helper.</span></div>" : "") +
       (es.length ? es.map(entryRowHTML).join("") : '<p class="empty">Nothing logged on this day.</p>') +
       "</div>";
   }
@@ -4072,7 +4124,7 @@
       olderCopy;
   }
 
-  // Copies the app keeps by itself: the data as it was before the v5 update,
+  // Copies the app keeps by itself: the data as it was before the last update,
   // and any stored data that couldn't be read. Shown only when they exist.
   function safetyCopiesHTML() {
     var pre = sideCopy(PRE_UPDATE_KEY), bad = sideCopy(RECOVER_KEY);
@@ -4731,7 +4783,7 @@
     }).catch(function () { return null; });
   }
 
-  /* One pull → merge → push round, on the data v5 record. The decision itself
+  /* One pull → merge → push round, on the cloud record ("m5": the name is kept across data versions). The decision itself
      is MODEL.reconcile (pure, tested in Node); this only does the I/O around
      it. Resolves to true when anything changed locally. `triesLeft` covers
      the compare-and-set retry. */

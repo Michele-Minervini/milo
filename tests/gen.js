@@ -94,6 +94,8 @@ function makeGen(seed) {
       e.exId = pick(["bench_bb", "row_db", "x_1", "x_2", "bad id!", 3]);
       e.sets = rnd() < 0.05 ? "no" : Array.from({ length: Math.floor(rnd() * 5) }, () => pick([8, 10, 12, 0, -1, 7.6, "9", null, "x"]));
       maybe(0.9, () => { e.kg = Array.from({ length: Math.floor(rnd() * 5) }, () => pick([60, 62.5, "62,5", " 7 ", 62.3, -5, 2000, "abc", null])); });
+      // data v6: warm-up marks made by hand (absent on entries written before v6).
+      maybe(0.6, () => { e.warm = pick([[1, 0, 0], [0, 0, 0, 0, 0], [1], [], [true, false, 1], [2, "1", null, -1], null, "x", { 0: 1 }]); });
     } else if (k < 0.8) {
       e.kind = "quick";
       e.groups = rnd() < 0.05 ? "no" : {};
@@ -124,7 +126,7 @@ function makeGen(seed) {
   function state5() {
     const s = state();
     if (!s || typeof s !== "object" || Array.isArray(s) || !s.areas || typeof s.areas !== "object") return s;
-    s.v = pick([5, 5, 5, 4, 6, "6"]);
+    s.v = pick([6, 6, 5, 5, 7, "7"]);
     s.log = Array.from({ length: Math.floor(rnd() * 7) }, entry5);
     s.settings = Object.assign({}, typeof s.settings === "object" ? s.settings : {}, {
       restGym: pick([90, 120, 4, null]),

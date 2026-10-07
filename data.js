@@ -8,7 +8,7 @@
    ============================================================ */
 
 /* Build stamp: app.js refuses to run on files from two different releases. */
-const DATA_BUILD = "milo-v22";
+const DATA_BUILD = "milo-v23";
 
 const AREAS = [
   {
@@ -1299,7 +1299,10 @@ const GYM_EXERCISES = [
   { id: "pushup_wide",    name: "Wide push-up",                 p: "chest", s: ["shoulders", "arms"], equip: "bodyweight", lo: 10, hi: 20, inc: 2.5, perHand: false, load: "bw", timed: false },
   { id: "pushup_decline", name: "Decline push-up (feet raised)", p: "chest", s: ["shoulders", "arms"], equip: "bodyweight", lo: 8,  hi: 15, inc: 2.5, perHand: false, load: "bw", timed: false },
   // Back
-  { id: "pulldown",      name: "Lat pulldown",               p: "back",      s: ["arms"],              equip: "cable",      lo: 8,  hi: 12, inc: 2.5, perHand: false, load: "ext",    timed: false },
+  // The bar comes down in front of the head, to the chest. (Until milo-v23
+  // this was the only "Lat pulldown": sessions logged then stay here.)
+  { id: "pulldown",      name: "Lat pulldown (front)",       p: "back",      s: ["arms"],              equip: "cable",      lo: 8,  hi: 12, inc: 2.5, perHand: false, load: "ext",    timed: false },
+  { id: "pulldown_behind", name: "Lat pulldown (behind the head)", p: "back", s: ["arms"],             equip: "cable",      lo: 8,  hi: 12, inc: 2.5, perHand: false, load: "ext",    timed: false },
   { id: "row_cable",     name: "Seated cable row",           p: "back",      s: ["arms"],              equip: "cable",      lo: 8,  hi: 12, inc: 2.5, perHand: false, load: "ext",    timed: false },
   { id: "row_db",        name: "One-arm dumbbell row",       p: "back",      s: ["arms"],              equip: "dumbbell",   lo: 8,  hi: 12, inc: 2,   perHand: true,  load: "ext",    timed: false },
   { id: "row_bb",        name: "Barbell row",                p: "back",      s: ["arms"],              equip: "barbell",    lo: 6,  hi: 10, inc: 2.5, perHand: false, load: "ext",    timed: false },
@@ -1359,6 +1362,9 @@ const GYM_EXERCISES = [
   { id: "leg_curl",      name: "Leg curl",                   p: "legs",      s: [],                    equip: "machine",    lo: 10, hi: 15, inc: 5,   perHand: false, load: "ext",    timed: false },
   { id: "leg_ext",       name: "Leg extension",              p: "legs",      s: [],                    equip: "machine",    lo: 10, hi: 15, inc: 5,   perHand: false, load: "ext",    timed: false },
   { id: "bulgarian_db",  name: "Bulgarian split squat",      p: "legs",      s: [],                    equip: "dumbbell",   lo: 8,  hi: 12, inc: 2,   perHand: true,  load: "ext",    timed: false },
+  // Both feet on the floor, one ahead of the other (the Bulgarian one above
+  // has the back foot on a bench).
+  { id: "split_squat_db", name: "Dumbbell split squat",      p: "legs",      s: [],                    equip: "dumbbell",   lo: 8,  hi: 12, inc: 2,   perHand: true,  load: "ext",    timed: false },
   { id: "hip_thrust_bb", name: "Hip thrust",                 p: "legs",      s: [],                    equip: "barbell",    lo: 8,  hi: 12, inc: 2.5, perHand: false, load: "ext",    timed: false },
   { id: "calf_raise",    name: "Calf raise",                 p: "legs",      s: [],                    equip: "machine",    lo: 10, hi: 20, inc: 5,   perHand: false, load: "ext",    timed: false },
   { id: "goblet_squat",  name: "Goblet squat",               p: "legs",      s: [],                    equip: "dumbbell",   lo: 8,  hi: 12, inc: 2,   perHand: false, load: "ext",    timed: false }

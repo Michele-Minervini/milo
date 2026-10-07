@@ -11,13 +11,14 @@
    what a sanitizer outputs changes what every device stores: run
    sh tests/run.sh, and see ROADMAP.md before touching it.
 
-   Stored shape, data v5 (keys in this order):
+   Stored shape, data v6 (keys in this order):
    {
-     v: 5,
+     v: 6,
      areas:      { [areaId]: { step 1..10, std 0..3, mts } },
      log:        entries sorted by (ts, id), one per exercise done:
                    bodyweight  { id, ts, date, areaId, step, sets, note, mts, variant }
-                   gym         { id, ts, kind:"gym",   exId, sets:[reps], kg:[weight], note, mts }
+                   gym         { id, ts, kind:"gym",   exId, sets:[reps], kg:[weight], note, mts,
+                                 warm: [0|1 per set] | null }
                    quick       { id, ts, kind:"quick", groups:{ group: sets }, note, mts }
                    body        { id, ts, kind:"body",  kg, waist, note, mts }
      settings:   { restSeconds, restGym, autoRest, ghostBase, vol:[lo,hi], keepAwake }
@@ -33,14 +34,20 @@
 var MODEL = (function () {
   "use strict";
 
-  var BUILD = "milo-v22";
+  var BUILD = "milo-v23";
 
   // The shape of the stored data. Any change to what the sanitizers output is a
   // change to what every device keeps: bump this, and see ROADMAP.md.
-  var MODEL_VERSION = 5;
+  //   6 (milo-v23): gym entries carry `warm`, the warm-up marks made by
+  //     hand; the gym rest starts at 0:50 instead of 2:00.
+  var MODEL_VERSION = 6;
 
   var KNOWN_IDS = AREAS.map(function (a) { return a.id; });
   var DEFAULT_REST = 180; // seconds
+  var DEFAULT_REST_GYM = 50;
+  // The gym rest every device started with before data v6. Data from before
+  // v6 that still says this is read as the new default (see sanitizeState).
+  var OLD_REST_GYM = 120;
 
   // Muscle groups, in their canonical order. Part of the stored format (quick
   // logs and exercises name them), so this list is tied to MODEL_VERSION.
@@ -152,7 +159,7 @@ var MODEL = (function () {
   /* ---------- Defaults ---------- */
 
   function defaultSettings() {
-    return { restSeconds: DEFAULT_REST, restGym: 120, autoRest: true, ghostBase: null, vol: [10, 20], keepAwake: false };
+    return { restSeconds: DEFAULT_REST, restGym: DEFAULT_REST_GYM, autoRest: true, ghostBase: null, vol: [10, 20], keepAwake: false };
   }
   function defaultRoutine() {
     return { split: "off", mode: "bw", sessionIndex: 0, override: null };
@@ -203,8 +210,10 @@ var MODEL = (function () {
 
   /* ---------- Sanitizing ---------- */
 
-  // Accepts any older shape (v1 progress-only through v4) or a v5 state and
-  // returns a clean v5 state; invalid pieces are dropped, not fatal. Returns
+  // Accepts any older shape (v1 progress-only through v5) or a v6 state and
+  // returns a clean v6 state; invalid pieces are dropped, not fatal. An older
+  // state is changed on the way in (v5: gym entries gain warm: null, and a gym
+  // rest still on the old 2:00 is read as 0:50). Returns
   // null for something that isn't a state at all, and for newer data.
   function sanitizeState(s) {
     // areas must be a real object map — a truthy scalar/array would slip past a
@@ -213,6 +222,8 @@ var MODEL = (function () {
     if (isNewer(s)) return null;
     // Before v5 there were no per-field stamps: one prefsMts covered everything.
     var legacyShape = !s.pm || typeof s.pm !== "object" || Array.isArray(s.pm);
+    // Written before data v6 (a missing or unreadable version counts as old).
+    var pre6 = !(Number(s.v) >= 6);
     var out = defaultState();
 
     AREAS.forEach(function (a) {
@@ -238,8 +249,12 @@ var MODEL = (function () {
 
     var rs = intIn(ss.restSeconds, 5, 3600);
     if (rs !== null) out.settings.restSeconds = rs;
+    // Before v6 the gym rest started at 2:00, and that 2:00 is in every older
+    // copy of the data. Read as the new 0:50 — the value only: its stamp is
+    // kept, so two devices (or a backup) give the same result whichever is
+    // updated or merged first, and any later choice still wins.
     var rg = intIn(ss.restGym, 5, 3600);
-    if (rg !== null) out.settings.restGym = rg;
+    if (rg !== null && !(pre6 && rg === OLD_REST_GYM)) out.settings.restGym = rg;
     if (typeof ss.autoRest === "boolean") out.settings.autoRest = ss.autoRest;
     // Same { d, v } shape as a snapshot, so the same validator does.
     if (hasSettings) out.settings.ghostBase = sanitizeSnapshot(ss.ghostBase);
@@ -398,17 +413,23 @@ var MODEL = (function () {
     if (typeof e.exId !== "string" || !ID_RE.test(e.exId)) return null;
     if (!Array.isArray(e.sets)) return null;
     var kgIn = Array.isArray(e.kg) ? e.kg : [];
-    var sets = [], kg = [];
+    // warm: the warm-up marks, made by hand since data v6 — one 0/1 per set,
+    // 1 = a warm-up (not counted). null = never marked by hand (written by a
+    // version without the marks): the old weight rule decides (training.js).
+    // An array of all 0 is NOT the same as null: it says "every set counts".
+    var warmIn = Array.isArray(e.warm) ? e.warm : null;
+    var sets = [], kg = [], warm = warmIn ? [] : null;
     e.sets.forEach(function (x, i) {
       if (sets.length >= CAPS.setsPerEntry) return;
       var r = intIn(x, 0, 3600);
-      if (r === null) return;       // an unreadable set is dropped with its weight
+      if (r === null) return;       // an unreadable set is dropped with its weight and its mark
       sets.push(r);
       kg.push(roundKg(parseKg(kgIn[i])));
+      if (warm) warm.push(warmIn[i] === 1 || warmIn[i] === true ? 1 : 0);
     });
     if (!sets.length) return null;
     var ts = entryTs(e);
-    return { id: entryId(e), ts: ts, kind: "gym", exId: e.exId, sets: sets, kg: kg, note: entryNote(e), mts: entryMts(e, ts) };
+    return { id: entryId(e), ts: ts, kind: "gym", exId: e.exId, sets: sets, kg: kg, note: entryNote(e), mts: entryMts(e, ts), warm: warm };
   }
 
   // A quick log: which muscle groups were trained, and roughly how many sets.

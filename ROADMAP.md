@@ -18,6 +18,7 @@ All tiers are built, tested, and deployed. Settings → More shows the build a d
 | **Tier 1** | v5 | Log a session (sets/reps or hold time); auto-detection of the Beginner/Intermediate/Progression standard with a move-up prompt; global rest timer; training-history list; downloadable full backup file. |
 | **Tier 2** | v7–v8 | Weekly routine + "Today's session" card; smart nudge; ghost radar (past vs now); GitHub-style training heatmap; streaks; milestone timeline; per-exercise sparkline; edit a logged session; QR code for the backup link. |
 | **Tier 3** | v9–v10 | Day detail (tap a heatmap square for that day's sessions); **optional cloud sync** across devices, paired by QR. |
+| **Data v6** | milo-v23 | **Warm-ups by hand**: a gym entry gains `warm` (one 0/1 per set, or `null` = never marked: the old weight rule still decides, so earlier sessions keep their numbers). In the gym sheet a set's number is a button: tap for **W**, logged but not counted; every new set counts until tapped. **Gym rest 0:50**: the default, and the 2:00 every older copy of the data carries is read as 0:50 when the data is older than v6 (value only, stamp kept, so the result doesn't depend on which device updates first; a later choice wins). **Dots in two levels** on the week strip and the calendar: solid = trained directly that day (`TRAINING.directWeights`: a gym exercise's own group, a quick log's listed groups, a skill's top-weighted group), ring = only as a helper. Catalogue: Dumbbell split squat; Lat pulldown became "(front)" and "(behind the head)" was added. Shipped as ONE build with its features: the guards below stop a device still on data v5 (it pauses sync and asks to reload); a half-step build would have erased marks. The cloud record keeps its name (`m5`), which is what lets an older device see the newer data and stop. Safety copy of the v5 data: `milo.pre6`. |
 | **Milo tweaks** | milo-v22 | After the first real gym weeks: **push-ups, plain pull-up, mid row and three more back exercises, a six-move abs circuit, forearm curls** in the catalogue; the assisted pull-up, cable crunch and ab wheel are **retired** (`GYM_RETIRED` in data.js: out of the picker, still resolving for old sessions — ids are never removed). Search ignores spaces, hyphens and a plural "s" ("pull ups" finds "Pull-up"). **0:50** rest. **Notification when the rest ends** (per-device, `milo.restNotify`; `registration.showNotification`, no server): the only route to a buzz on an iPhone — unconfirmed without a test on the device, hence the test button — and only while Milo is on screen, so the option also holds the screen on during a rest; the "Rest done" pill pulses. A rest that ended while the app was away no longer beeps on coming back. Added weight (pull-ups, dips) never counts as a "big jump" in suggestions. |
 | **Milo P2b** | milo-v21 | **Moved to `/milo/`** (new repo Michele-Minervini/milo). Once switched over, the old address is served by the repo `calisthenics-tracker` (local folder `calisthenics-tracker-redirect`): browser tabs are forwarded, sync links included; an app installed from the old address shows what it still holds with a backup button, its sync link and the steps to move; its `sw.js` switches off old installed copies (after a 12-second grace period for their last sync). In Milo: the sync QR tells iPhones to paste the link instead of scanning; a sync link pasted into the database box connects; "Coming from another device?" jumps to the right box. |
 | **Milo P4** | milo-v20 | **Gym exercises**: a catalogue (data.js `GYM_EXERCISES`, permanent ids) plus your own (`x_…` in `state.exercises`), a gym sheet with reps × kg per set where every ✓ saves at once, last time, a double-progression suggestion, warm-up sets recognised (and not counted), an exercise sheet (your numbers, rep range / weight step / setup note, history). Rest: +30 s / Skip, separate gym rest, kept across reloads; optional keep-screen-on. |
@@ -105,7 +106,9 @@ None committed — just a menu for later:
   `milo.come` ("Coming from another device?" on an untouched device),
   `milo.rest` (a running rest timer's end time), `milo.gymDraft`,
   `milo.restNotify` ("on": send a notification when the rest ends — the
-  permission is per device too).
+  permission is per device too), `milo.pre6` (the data as it was before
+  data v6, offered in Settings → More; `milo.pre5` from the earlier update
+  may still sit beside it and is left alone).
 - **Weekly volume is counted, never stored** (training.js). Each hard set counts
   1 for its main muscle group and ½ for each helper (data.js `AREA_GROUPS`,
   per-step overrides, `VARIATION_GROUPS`); a quick gym day gives its groups'
@@ -134,15 +137,13 @@ None committed — just a menu for later:
   silently drop or duplicate.
 - **What gets stored is pinned by tests.** `model.js` holds the default state,
   the sanitizers every load / restore / sync goes through, and the merge.
-  `tests/fixtures/sanitize-v4.json` (hand-written cases) and `recorded-v4.json`
-  (fingerprints of 400 random states and 300 merges, both orders) record their
-  exact output, taken from the code users had before the move;
+  `tests/fixtures/sanitize-v<N>.json` (hand-written cases) and
+  `recorded-v<N>.json` (fingerprints of 400 random states and 300 merges, both
+  orders), N being the current data version, record their exact output;
   `tests/model-test.js` and `tests/merge-test.js` fail on any change. A
   deliberate change to the stored shape bumps `MODEL_VERSION` in `model.js`
   and re-records with `node tools/record-fixtures.js`, which refuses to run
-  otherwise — never "fix the test" to match. Known and pinned on purpose: on
-  equal `prefsMts` the local side's settings win, so merge isn't yet symmetric
-  for settings; the next data version fixes it.
+  otherwise — never "fix the test" to match.
 - **The backup-link payload order is frozen** (`PAYLOAD_ORDER` in `app.js`) so
   old links keep importing correctly — never reuse the radar's axis order for it.
 - **Sync merges must stay commutative and idempotent.** Both devices run the
@@ -181,8 +182,13 @@ None committed — just a menu for later:
   entry point: sync (the cloud is newer → pause, don't push), load (stored data
   is newer → read-only + banner, never save), another tab (same), restore
   (refused). Any change to the stored shape must bump `MODEL_VERSION`, so
-  these guards can recognise it — and ship on its own, fix forward, never
-  revert across a bump.
+  these guards can recognise it — fix forward, never revert across a bump.
+  (v5 shipped on its own because older copies had no guards yet. Since v5
+  they do, so v6 shipped together with the feature that needed it: a build
+  that knows the new shape but still writes entries the old way would have
+  erased the new marks.) Keep the cloud record's name (`m5`): an older device
+  only stops when it SEES the newer data there. Each bump takes a fresh
+  safety-copy key (`milo.pre6`), since a copy is never replaced.
 - **Reset / replace-from-backup mark themselves** (`milo.replaceAt`) so other
   open tabs adopt the result instead of merging the removed sessions back.
   With sync on, other devices still merge them back — that's inherent to a

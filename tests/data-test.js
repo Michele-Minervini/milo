@@ -211,7 +211,7 @@ GYM.forEach(e => {
   check("kg per hand: the dumbbell-in-each-hand and one-arm exercises, not the goblet squat",
     same(GYM.filter(e => e.perHand).map(e => e.id),
       ["bench_db", "incline_db", "row_db", "row_chest_db", "ohp_db", "lateral_db", "rear_fly_db", "curl_db", "hammer_db",
-        "wrist_curl_db", "wrist_curl_rev_db", "bulgarian_db"]));
+        "wrist_curl_db", "wrist_curl_rev_db", "bulgarian_db", "split_squat_db"]));
   check("added weight: dips, chin-up, pull-up, back extension, bench dips, weighted knee raise · assisted: the pull-up machine · " +
     "bodyweight only: the push-ups, ab wheel, plank and the floor or hanging abs work",
     same(["added", "assist", "bw"].map(l => GYM.filter(e => e.load === l).map(e => e.id)),
@@ -220,7 +220,7 @@ GYM.forEach(e => {
           "leg_lift", "leg_raise_single", "around_world", "knee_raise_side", "hold_failure"]]));
   check("push-ups count like a press (chest + ½ shoulders, ½ arms), pulls give ½ to arms, the straight-arm pulldown doesn't",
     ["pushup_std", "pushup_close", "pushup_wide", "pushup_decline"].every(id => same(GYM.filter(e => e.id === id).map(e => [e.p].concat(Array.from(e.s)))[0], ["chest", "shoulders", "arms"])) &&
-    ["pullup_std", "row_machine", "pulldown_close", "row_chest_db"].every(id => same(GYM.filter(e => e.id === id).map(e => [e.p].concat(Array.from(e.s)))[0], ["back", "arms"])) &&
+    ["pulldown", "pulldown_behind", "pullup_std", "row_machine", "pulldown_close", "row_chest_db"].every(id => same(GYM.filter(e => e.id === id).map(e => [e.p].concat(Array.from(e.s)))[0], ["back", "arms"])) &&
     same(GYM.filter(e => e.id === "pulldown_straight").map(e => [e.p].concat(Array.from(e.s)))[0], ["back"]));
   const byId = {};
   GYM.forEach(e => { byId[e.id] = e; });
@@ -249,7 +249,9 @@ section("frozen gym ids (they live in stored logs)");
     "pushup_std", "pushup_close", "pushup_wide", "pushup_decline",
     "pullup_std", "row_machine", "pulldown_close", "pulldown_straight", "row_chest_db",
     "wrist_curl_db", "wrist_curl_rev_db",
-    "knee_raise_w", "leg_lift", "leg_raise_single", "around_world", "knee_raise_side", "hold_failure"
+    "knee_raise_w", "leg_lift", "leg_raise_single", "around_world", "knee_raise_side", "hold_failure",
+    // milo-v23
+    "pulldown_behind", "split_squat_db"
   ];
   const ids = GYM.map(e => e.id);
   const gone = FROZEN.filter(id => ids.indexOf(id) === -1);

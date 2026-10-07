@@ -44,7 +44,12 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   every tick is saved at once, and starts the rest timer. Milo shows what you
   did last time and suggests the next step — add weight when you hit the top of
   the rep range on every set, otherwise one more rep, and lighter after a long
-  break. Warm-up sets are recognised and don't count toward the weekly bars.
+  break. Every set counts toward the weekly bars unless you tap its number to
+  make it **W**, a warm-up: it stays in the log but isn't counted (sessions
+  logged with a build older than milo-v23 keep the old automatic guess until
+  you open one and change it). The suggestion for next time is planned from
+  your sets near the top weight only, so lighter build-up sets count on the
+  bars without turning into "four sets at the top weight".
   Each exercise has its own rep range, weight step and setup note ("seat 4"),
   which you can change.
 - **Logging a skill session.** Enter your sets and reps (or hold time) and

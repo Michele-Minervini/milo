@@ -51,7 +51,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v22";
+  var BUILD = "milo-v23";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -225,6 +225,15 @@ var TRAINING = (function () {
     return GROUPS.filter(function (g) { return acc[g] >= DOT_SETS; });
   }
 
+  // Of those, the groups trained DIRECTLY: the ones whose direct credit
+  // alone (directWeights) reaches DOT_SETS, in GROUPS order. Always a
+  // subset of dotted(entries): direct credit is part of the total.
+  function directDots(entries) {
+    var acc = zeros();
+    entries.forEach(function (e) { addInto(acc, directWeights(e), 1); });
+    return GROUPS.filter(function (g) { return quarter(acc[g]) >= DOT_SETS; });
+  }
+
   /* ---------- Weeks ---------- */
 
   // Monday 00:00 local time of the week containing ts, as ms.
@@ -342,6 +351,41 @@ var TRAINING = (function () {
       if (g) addInto(acc, g.weights, g.sets);
     } else {
       quickLines(e).forEach(function (q) { addInto(acc, q.weights, q.sets); });
+    }
+    return cleanWeights(acc);
+  }
+
+  // The group(s) one skill set is FOR: those with the highest weight in
+  // what it counts for, in GROUPS order. One group as a rule; two when
+  // they tie (wall headstands: shoulders ½, abs ½); none for {}.
+  function topGroups(weights) {
+    var top = 0;
+    GROUPS.forEach(function (g) { if (own(weights, g) && weights[g] > top) top = weights[g]; });
+    return GROUPS.filter(function (g) { return top > 0 && own(weights, g) && weights[g] === top; });
+  }
+
+  // The part of groupWeights(e) that is DIRECT work, { group: sets }:
+  //   ladder  hardSets × the weight of the group(s) the set is for
+  //           (topGroups): chest for pushups; shoulders AND abs, ½ each,
+  //           for the two balance holds at the foot of the handstand ladder
+  //   gym     working sets × 1 for the exercise's own group (p); the groups
+  //           it helps (s) never — also when this version doesn't know p
+  //   quick   n × 1 for each group the log lists; their ¼ helpers never
+  // What it leaves out is the help. Never more than groupWeights(e) for
+  // any group, so a bright dot is always a dot.
+  function directWeights(e) {
+    if (!e || typeof e !== "object") return {};
+    var acc = {};
+    if (e.kind === undefined) {
+      var n = hardSets(e), w = setWeights(e.areaId, e.step, e.variant);
+      if (n) topGroups(w).forEach(function (g) { acc[g] = n * w[g]; });
+    } else if (e.kind === "gym") {
+      var line = gymLine(e), ex = line ? exRec(e.exId) : null;
+      if (ex && isGroup(ex.p) && own(line.weights, ex.p)) acc[ex.p] = line.sets * line.weights[ex.p];
+    } else {
+      quickLines(e).forEach(function (q) {
+        if (own(q.weights, q.group)) acc[q.group] = (acc[q.group] || 0) + q.sets * q.weights[q.group];
+      });
     }
     return cleanWeights(acc);
   }
@@ -715,6 +759,21 @@ var TRAINING = (function () {
     return dotted(between(log, dayStart(ts), nextDay(ts)));
   }
 
+  // Of dayGroups(log, ts), the groups trained directly that day (bright
+  // dots); the rest only got there with help (faded dots).
+  function dayDirect(log, ts) {
+    if (!validTime(ts)) return [];
+    return directDots(between(log, dayStart(ts), nextDay(ts)));
+  }
+
+  // Both at once, { groups, direct }, reading the day's entries one time
+  // (the month calendar asks for every day it shows).
+  function dayDots(log, ts) {
+    if (!validTime(ts)) return { groups: [], direct: [] };
+    var day = between(log, dayStart(ts), nextDay(ts));
+    return { groups: dotted(day), direct: directDots(day) };
+  }
+
   // The seven days, Monday first, of the week containing now:
   //   [{ key "YYYY-MM-DD", ts (local midnight), dow 0–6 (Monday 0),
   //      groups (dayGroups), trained, today, future }]
@@ -732,6 +791,7 @@ var TRAINING = (function () {
       out.push({
         key: dateStr(t), ts: t, dow: i,
         groups: dotted(that),
+        direct: directDots(that),
         trained: that.some(isTraining),
         today: t === today,
         future: t > today
@@ -1058,19 +1118,30 @@ var TRAINING = (function () {
     return !!ex && !ex.timed && ex.load === "ext";
   }
 
+  // Whether a gym entry carries warm-up marks made by hand (data v6): a
+  // list, even one of all 0 ("every set counts"). Without one (null: the
+  // entry was last written by a version without the marks) the old weight
+  // rule below decides, so sessions from before keep their numbers.
+  function hasMarks(e) {
+    return !!e && e.kind === "gym" && Array.isArray(e.warm);
+  }
+
   // Which sets of an entry are working sets: [true|false] per set.
-  //   gym, load ext or added (not timed), some set with kg > 0: a set is
-  //     working when its e1RM is at least WARMUP_SHARE (0.8) of the
+  //   gym WITH marks (e.warm): every set with reps above 0 that isn't
+  //     marked as a warm-up. Nothing is guessed.
+  //   gym without marks, load ext (not timed), some set with kg > 0: a set
+  //     is working when its e1RM is at least WARMUP_SHARE (0.8) of the
   //     entry's best set's — lighter sets were warm-ups. 60 × 12, then
   //     100 × 8, 8, 7 → [false, true, true, true].
-  //   gym, anything else (assist, bw, timed, all at 0 kg, an exercise
-  //     nobody knows): every set with reps above 0
+  //   gym without marks, anything else (added, assist, bw, timed, all at
+  //     0 kg, an exercise nobody knows): every set with reps above 0
   //   a skill entry: every set above 0 (as hardSets counts them)
   // A set of 0 reps is never working. Takes a draft too
-  // ({ kind: "gym", exId, sets, kg }); [] for anything without sets.
+  // ({ kind: "gym", exId, sets, kg, warm }); [] for anything without sets.
   function workingSets(e) {
     if (!e || typeof e !== "object" || !Array.isArray(e.sets)) return [];
     var reps = e.sets.map(num);
+    if (hasMarks(e)) return reps.map(function (r, i) { return r > 0 && e.warm[i] !== 1 && e.warm[i] !== true; });
     var ex = e.kind === "gym" ? exRec(e.exId) : null;
     if (!filtersWarmups(ex)) return reps.map(function (r) { return r > 0; });
     var scores = reps.map(function (r, i) { return score(kgAt(e, i, ex), r); });
@@ -1078,6 +1149,16 @@ var TRAINING = (function () {
     if (!(best > 0)) return reps.map(function (r) { return r > 0; });
     // s ≥ 0.8 × best, exactly (both sides are multiples of 0.25).
     return scores.map(function (s, i) { return reps[i] > 0 && s * 5 >= best * 4; });
+  }
+
+  // Which sets of a gym entry are warm-ups, [true|false] per set: the marks
+  // when it has them, else what the old rule says (a set with reps that
+  // isn't a working set). What the gym sheet shows when an entry is opened.
+  function warmups(e) {
+    if (!e || typeof e !== "object" || !Array.isArray(e.sets)) return [];
+    if (hasMarks(e)) return e.sets.map(function (r, i) { return e.warm[i] === 1 || e.warm[i] === true; });
+    var work = workingSets(e);
+    return e.sets.map(function (r, i) { return num(r) > 0 && !work[i]; });
   }
 
   // kg to a multiple of inc: mode "down" (floor), "up" (ceiling), anything
@@ -1185,10 +1266,27 @@ var TRAINING = (function () {
   //          an assisted machine; 0 for bodyweight only)
   //   at     the reps of its working sets at W, in order
   //   n      how many working sets it had (at W or not)
+  // The weekly bars count every set that isn't marked a warm-up, but the
+  // next session is planned from the sets NEAR THE TOP only: where the
+  // weights tell (an external weight, not timed), a counted set whose e1RM
+  // is under WARMUP_SHARE of the best counted one is a build-up set and is
+  // left out here. Otherwise a pyramid (20, 30, 40 kg) would come back as
+  // "3 sets at 40 kg". For an entry without marks this changes nothing: the
+  // old rule already left those sets out.
   function sessionTop(e, ex) {
     var flags = workingSets(e), reps = [], kg = [];
     e.sets.forEach(function (x, i) { if (flags[i]) { reps.push(num(x)); kg.push(kgAt(e, i, ex)); } });
     if (!reps.length) return null;
+    if (filtersWarmups(ex)) {
+      var scores = reps.map(function (r, i) { return score(kg[i], r); });
+      var best = Math.max.apply(null, scores);
+      if (best > 0) {
+        // s ≥ 0.8 × best, exactly (the same test workingSets uses).
+        var near = scores.map(function (s) { return s * 5 >= best * 4; });
+        reps = reps.filter(function (r, i) { return near[i]; });
+        kg = kg.filter(function (k, i) { return near[i]; });
+      }
+    }
     var W = ex.load === "assist" && ex.known ? Math.min.apply(null, kg) : Math.max.apply(null, kg);
     return {
       id: e.id, ts: timeOf(e), W: W, n: reps.length,
@@ -1200,16 +1298,23 @@ var TRAINING = (function () {
   // exercise on a day, e.g. after changing the day of one): their sets in
   // time order, under the latest entry's id and time. Input and output are
   // newest first.
+  // Warm-up marks go along. A day whose entries all lack marks stays
+  // unmarked, so the old rule runs over the whole day as it always did; as
+  // soon as one entry has marks, each entry's own warm-ups (its marks, or
+  // the old rule over its own sets) become the day's marks.
   var SESSIONS_LOOKED_AT = 12;
   function mergeDays(list) {
     var out = [];
+    var marks = function (e) { return warmups(e).map(function (w) { return w ? 1 : 0; }); };
     list.forEach(function (e) {
       var k = MODEL.dateStr(timeOf(e)), cur = out.length ? out[out.length - 1] : null;
       if (cur && cur.day === k) {
+        if (cur.warm || hasMarks(e)) cur.warm = marks(e).concat(cur.warm || marks(cur));
         cur.sets = e.sets.concat(cur.sets);
         cur.kg = (Array.isArray(e.kg) ? e.kg : []).concat(cur.kg);
       } else {
-        out.push({ day: k, id: e.id, ts: e.ts, kind: "gym", exId: e.exId, sets: e.sets.slice(), kg: Array.isArray(e.kg) ? e.kg.slice() : [] });
+        out.push({ day: k, id: e.id, ts: e.ts, kind: "gym", exId: e.exId, sets: e.sets.slice(), kg: Array.isArray(e.kg) ? e.kg.slice() : [],
+          warm: hasMarks(e) ? marks(e) : null });
       }
     });
     return out;
@@ -1359,6 +1464,9 @@ var TRAINING = (function () {
     lastTrained: lastTrained,
     daysSince: daysSince,
     dayGroups: dayGroups,
+    dayDirect: dayDirect,
+    dayDots: dayDots,
+    directWeights: directWeights,
     weekStrip: weekStrip,
     workoutDays: workoutDays,
     workoutsInWeek: workoutsInWeek,
@@ -1375,6 +1483,7 @@ var TRAINING = (function () {
     exerciseList: exerciseList,
     e1rm: e1rm,
     workingSets: workingSets,
+    warmups: warmups,
     roundTo: roundTo,
     sessionsFor: sessionsFor,
     lastSession: lastSession,

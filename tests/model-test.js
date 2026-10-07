@@ -77,13 +77,13 @@ section("moving from data v4");
     prefsMts: T - 5000
   };
   const v5 = S(v4);
-  check("becomes data v5 with every section", v5.v === 5 && same(Object.keys(v5), ["v", "areas", "log", "settings", "routine", "pm", "snapshots", "milestones", "deleted", "exercises"]));
+  check("becomes the current data version with every section", v5.v === M.MODEL_VERSION && same(Object.keys(v5), ["v", "areas", "log", "settings", "routine", "pm", "snapshots", "milestones", "deleted", "exercises"]));
   check("sessions kept, now sorted by time", same(v5.log.map(e => e.id), ["e1", "e2"]));
   check("session content unchanged, same fields in the same order",
     same(v5.log[0], v4.log[1]) && same(Object.keys(v5.log[0]), ["id", "ts", "date", "areaId", "step", "sets", "note", "mts", "variant"]));
   check("routine 3 days/week becomes split bb3, rotation kept", v5.routine.split === "bb3" && v5.routine.sessionIndex === 1 && v5.routine.mode === "bw");
   check("rest time and starting point kept", v5.settings.restSeconds === 120 && same(v5.settings.ghostBase, v4.settings.ghostBase));
-  check("the new settings get their defaults", v5.settings.restGym === 120 && v5.settings.autoRest === true && same(v5.settings.vol, [10, 20]) && v5.settings.keepAwake === false);
+  check("the new settings get their defaults", v5.settings.restGym === 50 && v5.settings.autoRest === true && same(v5.settings.vol, [10, 20]) && v5.settings.keepAwake === false);
   check("carried-over settings keep the old prefsMts as their stamp",
     v5.pm.restSeconds === v4.prefsMts && v5.pm.ghostBase === v4.prefsMts && v5.pm.split === v4.prefsMts && v5.pm.sessionIndex === v4.prefsMts);
   check("new settings start unstamped", v5.pm.restGym === 0 && v5.pm.vol === 0 && v5.pm.mode === 0);
@@ -96,16 +96,16 @@ section("moving from data v4");
 }
 
 section("data from a newer version is refused, never stripped");
-check("isNewer: v6", M.isNewer({ v: 6, areas: {} }) && M.isNewer({ v: "6", areas: {} }));
-check("isNewer: not v5 or older", !M.isNewer({ v: 5 }) && !M.isNewer({ v: 1 }) && !M.isNewer({}) && !M.isNewer(null));
-check("sanitizeState returns null for newer data", M.sanitizeState({ v: 6, areas: {} }) === null);
+check("isNewer: v7", M.isNewer({ v: 7, areas: {} }) && M.isNewer({ v: "7", areas: {} }));
+check("isNewer: not v6 or older", !M.isNewer({ v: 6 }) && !M.isNewer({ v: 5 }) && !M.isNewer({ v: 1 }) && !M.isNewer({}) && !M.isNewer(null));
+check("sanitizeState returns null for newer data", M.sanitizeState({ v: 7, areas: {} }) === null);
 
 section("gym entries");
 {
   const g = x => S({ areas: {}, log: [Object.assign({ id: "g", ts: 1000, kind: "gym", exId: "bench_bb" }, x)] }).log[0];
   const e = g({ sets: [8, 8, 7], kg: [60, "62,5", " 62.3 "] });
   check("weights in kg with a comma or a dot, nearest 0.25", same(e.kg, [60, 62.5, 62.25]));
-  check("fields in a fixed order", same(Object.keys(e), ["id", "ts", "kind", "exId", "sets", "kg", "note", "mts"]));
+  check("fields in a fixed order", same(Object.keys(e), ["id", "ts", "kind", "exId", "sets", "kg", "note", "mts", "warm"]));
   check("bad weights become 0, huge ones capped", same(g({ sets: [5, 5, 5], kg: [-5, "abc", 2000] }).kg, [0, 0, 1000]));
   check("missing weights are 0, extra ones dropped", same(g({ sets: [5, 5], kg: [40] }).kg, [40, 0]) && same(g({ sets: [5], kg: [40, 50] }).kg, [40]));
   check("reps rounded; an unreadable set is dropped with its weight", same(g({ sets: [7.6, null, "x", -1, 9], kg: [10, 20, 30, 40, 50] }), g({ sets: [8, 9], kg: [10, 50] })));
@@ -113,6 +113,44 @@ section("gym entries");
   check("no usable set → dropped", S({ areas: {}, log: [{ id: "g", ts: 1, kind: "gym", exId: "a", sets: [null] }] }).log.length === 0);
   check("an unsafe exercise id → dropped", S({ areas: {}, log: [{ id: "g", ts: 1, kind: "gym", exId: "a b<", sets: [5] }] }).log.length === 0);
   check("an exercise id the catalogue doesn't know is kept", g({ exId: "some_new_lift", sets: [5] }).exId === "some_new_lift");
+  // data v6: warm-up marks made by hand.
+  check("no marks (an entry from before v6) → warm is null: the old rule decides", e.warm === null);
+  check("…also for anything that isn't a list", [null, undefined, "x", 1, { 0: 1 }, true].every(w => g({ sets: [5, 5], kg: [40, 40], warm: w }).warm === null));
+  check("marks are kept, one 0/1 per set", same(g({ sets: [12, 8, 8], kg: [20, 60, 60], warm: [1, 0, 0] }).warm, [1, 0, 0]));
+  check("…true counts as 1, anything else as 0", same(g({ sets: [5, 5, 5, 5, 5, 5], kg: [], warm: [true, false, 2, "1", null, -1] }).warm, [1, 0, 0, 0, 0, 0]));
+  check("…too few marks: the rest count; too many: dropped", same(g({ sets: [5, 5, 5], kg: [], warm: [1] }).warm, [1, 0, 0]) && same(g({ sets: [5], kg: [], warm: [0, 1, 1] }).warm, [0]));
+  check("…an empty list is still marks: every set counts (not the same as null)", same(g({ sets: [5, 5], kg: [], warm: [] }).warm, [0, 0]));
+  check("an unreadable set is dropped with its weight AND its mark",
+    same(g({ sets: [7.6, null, "x", 9], kg: [10, 20, 30, 50], warm: [0, 1, 1, 1] }), g({ sets: [8, 9], kg: [10, 50], warm: [0, 1] })));
+  check("at most 30 marks, like the sets", g({ sets: Array(40).fill(5), kg: [], warm: Array(40).fill(1) }).warm.length === 30);
+  check("sanitizing twice changes nothing", same(S({ areas: {}, log: [g({ sets: [5, 5], kg: [1, 2], warm: [1, 0] })] }).log[0], g({ sets: [5, 5], kg: [1, 2], warm: [1, 0] })));
+  check("other kinds of entry have no warm field",
+    !("warm" in S({ areas: {}, log: [{ id: "q", ts: 1, kind: "quick", groups: { legs: 3 }, warm: [1] }] }).log[0]) &&
+    !("warm" in S({ areas: {}, log: [{ id: "s", ts: 1, areaId: "pushup", step: 2, sets: [5], warm: [1] }] }).log[0]));
+}
+
+section("data v6: the gym rest starts at 0:50");
+{
+  const T1 = Date.UTC(2026, 8, 30), T2 = Date.UTC(2026, 9, 9);
+  const v5 = (restGym, stamp) => ({ v: 5, areas: {}, log: [], settings: { restSeconds: 180, restGym: restGym, autoRest: true, ghostBase: null, vol: [10, 20], keepAwake: false },
+    routine: { split: "off", mode: "bw", sessionIndex: 0, override: null },
+    pm: { restSeconds: 0, restGym: stamp, autoRest: 0, ghostBase: 0, vol: 0, keepAwake: 0, split: 0, mode: 0, sessionIndex: 0, override: 0 }, snapshots: [], milestones: [], deleted: [], exercises: [] });
+  const rest = s => [s.settings.restGym, s.pm.restGym];
+  check("a new device starts at 50 seconds, unstamped", same(rest(M.defaultState()), [50, 0]));
+  check("older data still on the old 2:00, never touched → 50, unstamped", same(rest(S(v5(120, 0))), [50, 0]));
+  check("…a 2:00 that was once tapped → 50 too, its stamp kept", same(rest(S(v5(120, T1))), [50, T1]));
+  check("…any other choice made before v6 is kept", same(rest(S(v5(90, T1))), [90, T1]) && same(rest(S(v5(50, T1))), [50, T1]));
+  check("…data older than v5 (no version, no stamps) → 50", S({ areas: {}, settings: { restSeconds: 120, restGym: 120 }, prefsMts: 5 }).settings.restGym === 50);
+  const chosen6 = Object.assign(v5(120, T2), { v: 6 });
+  check("2:00 chosen in v6 stays 2:00", same(rest(S(chosen6)), [120, T2]) && same(rest(S(S(chosen6))), [120, T2]));
+  const merged = (a, b) => rest(M.merge(S(a), S(b)));
+  check("…and beats an older copy still on the old 2:00, whichever comes first",
+    same(merged(chosen6, v5(120, 0)), [120, T2]) && same(merged(v5(120, 0), chosen6), [120, T2]) &&
+    same(merged(chosen6, v5(120, T1)), [120, T2]) && same(merged(v5(120, T1), chosen6), [120, T2]));
+  check("two older copies (2:00 tapped last on one, 1:30 earlier on the other) → 50 in either order: the later stamp wins, then reads as 0:50",
+    same(merged(v5(120, T2), v5(90, T1)), [50, T2]) && same(merged(v5(90, T1), v5(120, T2)), [50, T2]));
+  check("…and an earlier 2:00 never undoes a later 1:30", same(merged(v5(120, T1), v5(90, T2)), [90, T2]) && same(merged(v5(90, T2), v5(120, T1)), [90, T2]));
+  check("a v5 backup merged in later can't undo a choice made in v6", same(merged(Object.assign(v5(180, T2), { v: 6 }), v5(120, T1)), [180, T2]));
 }
 
 section("quick logs and weigh-ins");

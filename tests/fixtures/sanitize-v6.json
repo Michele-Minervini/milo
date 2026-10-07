@@ -1,6 +1,6 @@
 {
- "about": "Expected sanitizeState output for each input under data v5, recorded by tools/record-fixtures.js with the clock frozen at `now` and Math.random seeded with `seed`.",
- "modelVersion": 5,
+ "about": "Expected sanitizeState output for each input under data v6, recorded by tools/record-fixtures.js with the clock frozen at `now` and Math.random seeded with `seed`.",
+ "modelVersion": 6,
  "now": 1790503200000,
  "seed": 42,
  "cases": [
@@ -64,7 +64,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 4,
@@ -100,7 +100,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -182,7 +182,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 3,
@@ -233,7 +233,7 @@
     ],
     "settings": {
      "restSeconds": 120,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -275,7 +275,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -311,7 +311,7 @@
     "log": [],
     "settings": {
      "restSeconds": 5,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -353,7 +353,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -389,7 +389,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -431,7 +431,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -467,7 +467,7 @@
     "log": [],
     "settings": {
      "restSeconds": 3600,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -509,7 +509,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -545,7 +545,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -587,7 +587,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -623,7 +623,7 @@
     "log": [],
     "settings": {
      "restSeconds": 90,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -667,7 +667,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -703,7 +703,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -747,7 +747,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -783,7 +783,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -827,7 +827,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -863,7 +863,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -946,7 +946,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -996,7 +996,7 @@
     ],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -1055,7 +1055,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -1108,7 +1108,7 @@
     ],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -1158,7 +1158,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -1208,7 +1208,7 @@
     ],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -1277,7 +1277,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -1342,7 +1342,7 @@
     ],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -1425,7 +1425,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -1504,7 +1504,7 @@
     ],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -1586,7 +1586,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -1665,7 +1665,7 @@
     ],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -1762,7 +1762,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -1855,7 +1855,7 @@
     ],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -1910,7 +1910,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 2,
@@ -1946,7 +1946,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -1998,7 +1998,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2034,7 +2034,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": {
       "d": "2026-08-01",
@@ -2096,7 +2096,7 @@
     }
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2132,7 +2132,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": {
       "d": "2026-08-01",
@@ -2219,7 +2219,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2255,7 +2255,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": {
       "d": "2026-07-26",
@@ -2354,7 +2354,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2390,7 +2390,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -2473,7 +2473,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2509,7 +2509,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -2597,7 +2597,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2633,7 +2633,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -2702,7 +2702,7 @@
     ]
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2738,7 +2738,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -2787,7 +2787,7 @@
     "prefsMts": 1782892800000
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2823,7 +2823,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [
@@ -2863,7 +2863,7 @@
     "prefsMts": 0
    },
    "expected": {
-    "v": 5,
+    "v": 6,
     "areas": {
      "pushup": {
       "step": 1,
@@ -2899,7 +2899,7 @@
     "log": [],
     "settings": {
      "restSeconds": 180,
-     "restGym": 120,
+     "restGym": 50,
      "autoRest": true,
      "ghostBase": null,
      "vol": [

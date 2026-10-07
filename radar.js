@@ -81,7 +81,7 @@
 var RADAR = (function () {
   "use strict";
 
-  var BUILD = "milo-v22";
+  var BUILD = "milo-v23";
 
   var SVGNS = "http://www.w3.org/2000/svg";
 

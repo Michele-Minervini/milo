@@ -311,6 +311,50 @@ eq("log order doesn't matter", T.dayGroups(DAYS.slice().reverse(), L(2026, 9, 29
 eq("empty log → []", T.dayGroups([], W), []);
 eq("no log → []", T.dayGroups(null, W), []);
 
+section("bright and faded dots: the groups trained directly on a day");
+{
+  const GW = (exId, sets, kg) => G(W, exId, sets, kg);
+  eq("a gym exercise is for its own group only: bench press 3 sets → chest 3 (its ½s for shoulders and arms are help)",
+    T.directWeights(GW("bench_bb", [8, 8, 8], 100)), { chest: 3 });
+  eq("…face pulls are for shoulders, not the back they help", T.directWeights(GW("face_pull", [12, 12], 20)), { shoulders: 2 });
+  eq("…warm-ups and an exercise nobody knows give nothing", [T.directWeights(GW("bench_bb", [12, 8], [20, 100])), T.directWeights(GW("gone_ex", [8], 50))], [{ chest: 1 }, {}]);
+  eq("a quick log is for the groups it lists, not their ¼ helpers", T.directWeights(quick(W, { chest: 4, back: 3 })), { chest: 4, back: 3 });
+  eq("a skill set is for the group it counts most for: pushups → chest", T.directWeights(bw(W, "pushup", 5, [10, 10])), { chest: 2 });
+  eq("…two groups when they tie (wall headstands: shoulders ½, abs ½)", T.directWeights(bw(W, "hspu", 1, [30, 30])), { shoulders: 1, abs: 1 });
+  eq("…a half-credit variation is still for its group (Dead Hangs: arms ½)", T.directWeights(bw(W, "pullup", 3, [30], "Dead Hangs")), { arms: 0.5 });
+  eq("a weigh-in, junk → {}", [T.directWeights(weigh(W)), T.directWeights(null), T.directWeights(7), T.directWeights({})], [{}, {}, {}, {}]);
+  [
+    [L(2026, 9, 27, 12), ["chest"], "Sunday before: pushups"],
+    [L(2026, 9, 29), ["chest"], "Tuesday: chest directly; arms only got there with help (½ + ½), so its dot is faded"],
+    [L(2026, 10, 1, 9), ["back"], "Thursday: quick back 3"],
+    [L(2026, 10, 2, 9), ["chest"], "Friday: quick chest 5 — shoulders and arms have dots, both faded"],
+    [L(2026, 10, 3, 9), [], "Saturday: a weigh-in only"],
+    [L(2026, 10, 4, 9), ["chest"], "Sunday: bench press — chest bright, shoulders and arms faded"],
+    [L(2026, 10, 6, 12), [], "a day with nothing"]
+  ].forEach(([ts, want, name]) => eq(name, T.dayDirect(DAYS, ts), want));
+  const days = [27, 28, 29, 30].map(d => L(2026, 9, d, 12)).concat([1, 2, 3, 4, 5, 6].map(d => L(2026, 10, d, 12)));
+  check("dayDots gives both lists at once, the same as asking separately",
+    days.every(ts => same(T.dayDots(DAYS, ts), { groups: T.dayGroups(DAYS, ts), direct: T.dayDirect(DAYS, ts) })));
+  check("a bright dot is always a dot", days.every(ts => T.dayDirect(DAYS, ts).every(g => T.dayGroups(DAYS, ts).indexOf(g) !== -1)));
+  eq("no log, a time that isn't one → empty", [T.dayDirect(null, W), T.dayDirect(DAYS, NaN), T.dayDots([], W), T.dayDots(DAYS, "x")],
+    [[], [], { groups: [], direct: [] }, { groups: [], direct: [] }]);
+  // The owner's own examples.
+  const D1 = L(2026, 10, 6, 18);
+  const shoulderDay = [G(D1, "ohp_db", [10, 10, 10], 16), G(D1 + 1, "lateral_db", [12, 12, 12], 8), G(D1 + 2, "face_pull", [12, 12, 12], 20)];
+  eq("a shoulder day: back and arms have dots (1½ each from helping)…", T.dayGroups(shoulderDay, D1), ["back", "shoulders", "arms"]);
+  eq("…but only shoulders is bright", T.dayDirect(shoulderDay, D1), ["shoulders"]);
+  const backShoulders = [G(D1, "pulldown", [10, 10, 10], 50), G(D1 + 1, "row_cable", [10, 10, 10], 45), G(D1 + 2, "ohp_db", [10, 10, 10], 16)];
+  eq("a back + shoulders day: both bright, arms faded", [T.dayGroups(backShoulders, D1), T.dayDirect(backShoulders, D1)], [["back", "shoulders", "arms"], ["back", "shoulders"]]);
+  eq("one set of curls on the shoulder day makes arms bright too (it was trained directly)",
+    T.dayDirect(shoulderDay.concat([G(D1 + 3, "curl_db", [12], 10)]), D1), ["shoulders", "arms"]);
+  eq("the week strip carries both lists", T.weekStrip(shoulderDay, L(2026, 10, 7, 9)).filter(d => d.groups.length).map(d => [d.key, d.groups, d.direct]),
+    [["2026-10-06", ["back", "shoulders", "arms"], ["shoulders"]]]);
+  eq("Sunday 23:00: each strip day's bright dots are that day's own", T.weekStrip(DAYS, L(2026, 10, 4, 23)).map(d => d.direct),
+    [["legs"], ["chest"], ["abs"], ["back"], ["chest"], [], ["chest"]]);
+  eq("Thursday 15:00: today's are shown, future days stay empty", T.weekStrip(DAYS, L(2026, 10, 1, 15)).map(d => d.direct),
+    [["legs"], ["chest"], ["abs"], ["back"], [], [], []]);
+}
+
 section("the week strip");
 {
   const row = d => [d.key, d.dow, d.groups, d.trained, d.today, d.future];
@@ -1260,6 +1304,26 @@ section("warm-ups: which sets of a gym entry are working sets");
   eq("a gym entry with no reps counts for nothing", [T.hardSets(G(W, "bench_bb", [0, 0], 100)), T.groupWeights(G(W, "bench_bb", [0, 0], 100))], [0, {}]);
   T.useExercises([BAND]);
   eq("a load type this version doesn't know: every set with reps", WS("x_band", [10, 8], [5, 20]), [true, true]);
+  T.useExercises([]);
+  // Data v6: marks made by hand. With marks nothing is guessed.
+  const M4 = (warm, exId, sets, kg) => Object.assign(G(W, exId || "bench_bb", sets || [12, 8, 8, 7], kg || [60, 100, 100, 100]), { warm: warm });
+  eq("marks, none tapped: every set counts — also the light first one the old rule called a warm-up", T.workingSets(M4([0, 0, 0, 0])), [true, true, true, true]);
+  eq("…4 hard sets: chest 4, shoulders 2, arms 2", [T.hardSets(M4([0, 0, 0, 0])), T.groupWeights(M4([0, 0, 0, 0]))], [4, { chest: 4, shoulders: 2, arms: 2 }]);
+  eq("W on the first set: the other three count", T.workingSets(M4([1, 0, 0, 0])), [false, true, true, true]);
+  eq("W on the heaviest set: it doesn't count, the lighter ones do", T.workingSets(M4([0, 1, 1, 1])), [true, false, false, false]);
+  eq("every set marked W: nothing counts", [T.workingSets(M4([1, 1, 1, 1])), T.hardSets(M4([1, 1, 1, 1])), T.groupWeights(M4([1, 1, 1, 1]))], [[false, false, false, false], 0, {}]);
+  eq("a 0-rep set never counts, marked or not", T.workingSets(M4([0, 0], "bench_bb", [0, 8], [100, 100])), [false, true]);
+  eq("marks work on every kind of exercise: bodyweight, timed, added weight, assisted, your own",
+    [T.workingSets(M4([1, 0], "pushup_std", [10, 12], 0)), T.workingSets(M4([1, 0], "plank", [20, 45], 0)), T.workingSets(M4([1, 0], "dips", [8, 8], [0, 10])),
+      T.workingSets(M4([1, 0], "pullup_assist", [8, 8], 30)), T.workingSets(M4([0, 1], "gone_ex", [8, 8], 30))],
+    [[false, true], [false, true], [false, true], [false, true], [true, false]]);
+  eq("too few marks: the rest count; true is a mark too", T.workingSets(M4([true], "bench_bb", [12, 8, 8], [60, 100, 100])), [false, true, true]);
+  eq("null (an entry from before the marks): the old rule", T.workingSets(M4(null)), [false, true, true, true]);
+  eq("warmups(): the marks as they are…", T.warmups(M4([0, 1, 0, 0])), [false, true, false, false]);
+  eq("…or, without marks, what the old rule says", [T.warmups(M4(null)), T.warmups(G(W, "bench_bb", [0, 8], 100)), T.warmups(G(W, "plank", [30, 40], 0))],
+    [[true, false, false, false], [false, false], [false, false]]);
+  eq("…nothing with sets → []", [T.warmups(null), T.warmups({}), T.warmups(7)], [[], [], []]);
+  eq("a best set must be a counted one", T.best([M4([0, 1, 1, 1])], "bench_bb").kg, 60);
   T.useExercises([WPLANK]);
   eq("a timed exercise with weight on (your own weighted plank): every hold counts", WS("x_wplank", [60, 30], [5, 20]), [true, true]);
   eq("negative kg (junk) counts as none", [WS("bench_bb", [8, 8], [-100, 60]), T.best([G(W, "pullup_assist", [8, 8], [-5, 20], "n")], "pullup_assist").kg], [[false, true], 0]);
@@ -1588,6 +1652,39 @@ section("suggestions: double progression for the next session");
   eq("lo − 2 is never below 1 (range 2–3, 12.5 % jump)", K(S("bench_bb", [G(D(13), "bench_bb", [3, 3], 20)])), ["up", 22.5, 2, [1, 1]]);
   T.useExercises([]);
   eq("…and without the tweak: 5, 5, 5 × 100 is short of 10 → same", K(S("bench_bb", [G(D(13), "bench_bb", [5, 5, 5], 100)])), ["same", 100, 3, [6, 6, 6]]);
+  // Warm-up marks made by hand (data v6).
+  const MK = (ts, sets, kg, warm, id) => Object.assign(G(ts, "bench_bb", sets, kg, id), { warm: warm });
+  eq("no marks (before v6): 60 × 12 is a warm-up → same 100, 3 sets", K(S("bench_bb", [G(D(13), "bench_bb", [12, 8, 8, 7], [60, 100, 100, 100])])), ["same", 100, 3, [9, 9, 8]]);
+  eq("marks, none tapped: the light set counts on the bars, but the next session is planned from the sets near the top → still 3 sets",
+    K(S("bench_bb", [MK(D(13), [12, 8, 8, 7], [60, 100, 100, 100], [0, 0, 0, 0])])), ["same", 100, 3, [9, 9, 8]]);
+  // The owner's own squat session (kg × reps): 0 × 15, 12, 9 as warm-ups, then 9 × 15, 22.5 × 12, 31.5 × 9, 40.75 × 9.
+  const PYR = warm => Object.assign(G(D(13), "squat_bb", [15, 12, 9, 15, 12, 9, 9], [0, 0, 0, 9, 22.5, 31.5, 40.75]), { warm: warm });
+  eq("a pyramid, warm-ups marked: legs get the 4 counted sets…", T.groupWeights(PYR([1, 1, 1, 0, 0, 0, 0])), { legs: 4 });
+  eq("…and the suggestion is one set at the top weight, not four (squat 5–8: 9 reps → up 2.5 kg)", K(S("squat_bb", [PYR([1, 1, 1, 0, 0, 0, 0])])), ["up", 43.25, 1, [5]]);
+  eq("…nothing marked: legs 7, the suggestion still one set at the top", [T.groupWeights(PYR([0, 0, 0, 0, 0, 0, 0])), K(S("squat_bb", [PYR([0, 0, 0, 0, 0, 0, 0])]))], [{ legs: 7 }, ["up", 43.25, 1, [5]]]);
+  eq("…the same session before the marks (v22) gave the same suggestion", K(S("squat_bb", [PYR(null)])), ["up", 43.25, 1, [5]]);
+  eq("a back-off set close to the top still belongs: 100 × 8, 8, 8 then 90 × 10 → 4 sets",
+    K(S("bench_bb", [MK(D(13), [8, 8, 8, 10], [100, 100, 100, 90], [0, 0, 0, 0])])), ["same", 100, 4, [9, 9, 9, 9]]);
+  eq("added weight is not judged by its kg: dips at 0, 10, 10 kg, all counted → 3 sets",
+    K(S("dips", [Object.assign(G(D(13), "dips", [10, 8, 8], [0, 10, 10]), { warm: [0, 0, 0] })])), ["same", 10, 3, [9, 9, 9]]);
+  eq("W tapped on it: 3 sets again", K(S("bench_bb", [MK(D(13), [12, 8, 8, 7], [60, 100, 100, 100], [1, 0, 0, 0])])), ["same", 100, 3, [9, 9, 8]]);
+  eq("a session of warm-ups only is skipped: the one before it decides",
+    K(S("bench_bb", [G(D(8), "bench_bb", [10, 10, 10], 80), MK(D(13), [12, 12], [40, 40], [1, 1])])), ["up", 82.5, 3, [6, 6, 6]]);
+  eq("two entries on one day, one with marks: its marks and the other's old guess together",
+    K(S("bench_bb", [MK(D(13, 17), [12, 8], [60, 100], [1, 0], "ma"), G(D(13, 19), "bench_bb", [8, 7], 100, "mb")])), ["same", 100, 3, [9, 9, 8]]);
+  eq("…and a marked warm-up at the top weight stays out",
+    K(S("bench_bb", [MK(D(13, 17), [8, 8], [100, 100], [1, 0], "mc"), MK(D(13, 19), [8, 7], [100, 100], [0, 0], "md")])), ["same", 100, 3, [9, 9, 8]]);
+  eq("…the old entry earlier, the marked one later: the later marks don't slide onto the earlier sets",
+    K(S("bench_bb", [G(D(13, 17), "bench_bb", [12, 8], [60, 100], "mg"), MK(D(13, 19), [8, 8, 7], [100, 100, 100], [1, 0, 0], "mh")])), ["same", 100, 3, [9, 9, 8]]);
+  eq("…the unmarked entry's own warm-up is really guessed",
+    K(S("bench_bb", [MK(D(13, 17), [8, 8], [100, 100], [0, 0], "mi"), G(D(13, 19), "bench_bb", [12, 7], [60, 100], "mj")])), ["same", 100, 3, [9, 9, 8]]);
+  eq("…over its own sets, not the joined day (a lone 60 × 12 entry counts on the bars; the plan still looks near the top)",
+    [T.weekVolume([MK(D(13, 17), [8, 8], [100, 100], [0, 0], "mk"), G(D(13, 19), "bench_bb", [12], 60, "ml")], NOWG).chest,
+      K(S("bench_bb", [MK(D(13, 17), [8, 8], [100, 100], [0, 0], "mk"), G(D(13, 19), "bench_bb", [12], 60, "ml")]))], [3, ["same", 100, 2, [9, 9]]]);
+  eq("a warm-ups-only session doesn't restart the 6-week clock: the real one is 50 days back → return",
+    K(S("bench_bb", [G(L(2026, 8, 26), "bench_bb", [8, 8, 8], 100), MK(D(13), [12, 12], [40, 40], [1, 1])])), ["return", 90, 3, [6, 6, 6]]);
+  eq("two unmarked entries on one day are still judged together, as before (60 × 12 in one, 100 × 8, 8 in the other)",
+    K(S("bench_bb", [G(D(13, 17), "bench_bb", [12], 60, "me"), G(D(13, 19), "bench_bb", [8, 8], 100, "mf")])), ["same", 100, 2, [9, 9]]);
   T.useExercises([SLED, OLD, BAND]);
   eq("your own (10–20, +10 kg): 20, 20 × 100 → up 110, 10 % → lo", K(S("x_sled", [G(D(13), "x_sled", [20, 20], 100)])), ["up", 110, 2, [10, 10]]);
   eq("a deleted one of yours still suggests (an old entry being edited)", K(S("x_old", [G(D(13), "x_old", [9, 8], 50)])), ["same", 50, 2, [10, 9]]);
@@ -1689,7 +1786,7 @@ section("odd logs and odd times never break anything");
     T.useExercises(reg);
     glogs.forEach((log, i) => nows.forEach(now => {
       try {
-        (Array.isArray(log) ? log : []).forEach(e => { T.workingSets(e); T.hardSets(e); T.groupWeights(e); });
+        (Array.isArray(log) ? log : []).forEach(e => { T.workingSets(e); T.hardSets(e); T.groupWeights(e); T.directWeights(e); T.warmups(e); });
         T.weekVolume(log, now); T.breakdown(log, now, "chest");
       } catch (e) { gthrew.push("log " + i + ", now " + String(now) + ": " + e.message); }
       exIds.forEach(id => opts.forEach(o => {
