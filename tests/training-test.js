@@ -1683,6 +1683,38 @@ section("suggestions: double progression for the next session");
       K(S("bench_bb", [MK(D(13, 17), [8, 8], [100, 100], [0, 0], "mk"), G(D(13, 19), "bench_bb", [12], 60, "ml")]))], [3, ["same", 100, 2, [9, 9]]]);
   eq("a warm-ups-only session doesn't restart the 6-week clock: the real one is 50 days back → return",
     K(S("bench_bb", [G(L(2026, 8, 26), "bench_bb", [8, 8, 8], 100), MK(D(13), [12, 12], [40, 40], [1, 1])])), ["return", 90, 3, [6, 6, 6]]);
+  // The sheet opens as a copy of last time (planRows).
+  const PR = (exId, log, opts, now) => (T.planRows(exId, log, now === undefined ? NOWG : now, opts) || []).map(r => [r.kg, r.warm ? "W" : "", r.reps]);
+  eq("the owner's pyramid comes back as a pyramid: warm-ups marked, build-up sets as they were, only the top set moves (40.75 → 43.25, 5 reps)",
+    PR("squat_bb", [PYR([1, 1, 1, 0, 0, 0, 0])]),
+    [[0, "W", 15], [0, "W", 12], [0, "W", 9], [9, "", 15], [22.5, "", 12], [31.5, "", 9], [43.25, "", 5]]);
+  eq("…an entry from before the marks: the old rule's warm-ups come back as W rows", PR("bench_bb", [G(D(13), "bench_bb", [12, 8, 8, 7], [60, 100, 100, 100])]),
+    [[60, "W", 12], [100, "", 9], [100, "", 9], [100, "", 8]]);
+  eq("…straight sets, all at the top of the range → every row goes up", PR("bench_bb", [G(D(13), "bench_bb", [10, 10, 10], 100)]),
+    [[102.5, "", 6], [102.5, "", 6], [102.5, "", 6]]);
+  eq("…a back-off set keeps its own weight and gets a target too", PR("bench_bb", [MK(D(13), [8, 8, 8, 10], [100, 100, 100, 90], [0, 0, 0, 0])]),
+    [[100, "", 9], [100, "", 9], [100, "", 9], [90, "", 9]]);
+  eq("…after a long break the top is lighter, and no build-up set is left heavier than it",
+    [PR("bench_bb", [MK(L(2026, 8, 20), [10, 8, 8], [85, 100, 100], [0, 0, 0])]), PR("bench_bb", [MK(L(2026, 8, 20), [6, 8, 8], [95, 100, 100], [0, 0, 0])])],
+    [[[85, "", 6], [90, "", 6], [90, "", 6]], [[90, "", 6], [90, "", 6], [90, "", 6]]]);
+  eq("…bodyweight and timed: reps to beat, warm-ups as they were",
+    [PR("pushup_std", [Object.assign(G(D(13), "pushup_std", [8, 15, 12], 0), { warm: [1, 0, 0] })]), PR("plank", [G(D(13), "plank", [45, 40], 0)])],
+    [[[0, "W", 8], [0, "", 16], [0, "", 13]], [[0, "", 50], [0, "", 45]]]);
+  eq("…assisted: less help on the top sets", PR("pullup_assist", [G(D(13), "pullup_assist", [12, 12], 30)]), [[25, "", 6], [25, "", 6]]);
+  eq("…a 0-rep set is left out; a warm-ups-only session is not what gets copied",
+    [PR("bench_bb", [G(D(13), "bench_bb", [8, 0, 8], 100)]), PR("bench_bb", [G(D(8), "bench_bb", [8, 8], 80), MK(D(13), [12, 12], [40, 40], [1, 1])])],
+    [[[100, "", 9], [100, "", 9]], [[80, "", 9], [80, "", 9]]]);
+  eq("…two entries on one day are one session", PR("bench_bb", [MK(D(13, 17), [12, 8], [60, 100], [1, 0], "pa"), MK(D(13, 19), [8, 7], [100, 100], [0, 0], "pb")]),
+    [[60, "W", 12], [100, "", 9], [100, "", 9], [100, "", 8]]);
+  eq("…today's own entry is left out (exclude), and nothing to copy → null",
+    [PR("bench_bb", [G(D(13), "bench_bb", [8, 8], 100, "old"), G(L(2026, 10, 15, 8), "bench_bb", [5], 60, "today")], { exclude: "today" }),
+      T.planRows("bench_bb", [], NOWG), T.planRows("gone_ex", [G(D(13), "gone_ex", [8], 50)], NOWG), T.planRows("bench_bb", [G(D(13), "bench_bb", [8], 100)], NaN)],
+    [[[100, "", 9], [100, "", 9]], null, null, null]);
+  check("…the rows it plans from are exactly the suggestion's sets", ["squat_bb", "bench_bb", "dips", "plank", "pullup_assist"].every(id => {
+    const log = [Object.assign(G(D(13), id, [12, 10, 9, 9], [20, 40, 50, 50]), { warm: [1, 0, 0, 0] })];
+    const sg = T.suggest(id, log, NOWG), rows = T.planRows(id, log, NOWG);
+    return rows.length === 4 && rows[0].warm === true && rows.filter(r => !r.warm).length >= sg.sets;
+  }));
   eq("two unmarked entries on one day are still judged together, as before (60 × 12 in one, 100 × 8, 8 in the other)",
     K(S("bench_bb", [G(D(13, 17), "bench_bb", [12], 60, "me"), G(D(13, 19), "bench_bb", [8, 8], 100, "mf")])), ["same", 100, 2, [9, 9]]);
   T.useExercises([SLED, OLD, BAND]);

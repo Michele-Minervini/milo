@@ -49,7 +49,10 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   logged with a build older than milo-v23 keep the old automatic guess until
   you open one and change it). The suggestion for next time is planned from
   your sets near the top weight only, so lighter build-up sets count on the
-  bars without turning into "four sets at the top weight".
+  bars without turning into "four sets at the top weight". A new session
+  opens as a copy of last time's rows — warm-ups marked, each set at its own
+  weight, the reps to aim for in grey — and only the top sets move with the
+  suggestion, so a pyramid doesn't have to be typed again.
   Each exercise has its own rep range, weight step and setup note ("seat 4"),
   which you can change.
 - **Logging a skill session.** Enter your sets and reps (or hold time) and

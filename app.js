@@ -23,7 +23,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v23";
+  var BUILD = "milo-v24";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -2602,6 +2602,17 @@
   function gymSuggestion(exId, excludeId) {
     try { return TRAINING.suggest(exId, state.log, nowMs(), { exclude: excludeId }); } catch (e) { return null; }
   }
+  // Today's sheet as a copy of last time: one unticked row per set of that
+  // session — its weight, its warm-up mark, and the reps to aim for as the
+  // grey number in the box (`hint`). Only the top sets move with the
+  // suggestion. [] when there is no earlier session to copy.
+  function gymPlanRows(ex, exId, excludeId) {
+    var plan = null;
+    try { plan = TRAINING.planRows(exId, state.log, nowMs(), { exclude: excludeId }); } catch (e) { plan = null; }
+    return (plan || []).map(function (p) {
+      return { kg: hasKg(ex) ? String(fmtW(p.kg || 0)) : "", reps: "", done: false, warm: !!p.warm, hint: p.reps };
+    });
+  }
 
   function doneRow(ex, kg, reps, warm) {
     var k = hasKg(ex) ? String(fmtW(kg || 0)) : "", r = String(reps);
@@ -2648,11 +2659,17 @@
         (draft.rows || []).forEach(function (r) { d.rows.push({ kg: String(r.kg || ""), reps: String(r.reps || ""), done: false, warm: !!r.warm }); });
         if (draft.note) d.note = draft.note;
       }
-      // One empty set ready for the next one, at the last weight.
-      if (cont && !d.rows.some(function (r) { return !r.done; })) {
-        d.rows.push({ kg: d.rows.length ? d.rows[d.rows.length - 1].kg : "", reps: "", done: false, warm: false });
+      // Coming back mid-session: the rows of last time's copy that are still
+      // to do (the ones after those already there); when the copy is used
+      // up, one empty set at the last weight.
+      if (d.rows.length) {
+        d.rows = d.rows.concat(gymPlanRows(ex, exId, cont ? cont.id : null).slice(d.rows.length));
+        if (cont && !d.rows.some(function (r) { return !r.done; })) {
+          d.rows.push({ kg: d.rows[d.rows.length - 1].kg, reps: "", done: false, warm: false });
+        }
       }
     }
+    if (!d.rows.length) d.rows = gymPlanRows(ex, exId, null);
     if (!d.rows.length) {
       var sg = gymSuggestion(exId, null);
       var n = sg && sg.sets ? sg.sets : 3;
@@ -2727,12 +2744,15 @@
     // A suggestion is for today's workout; on a past day's entry it would be about the wrong day.
     var sg = d.date === k.today ? gymSuggestion(d.exId, d.entryId) : null;
     var targets = sg && sg.targets ? sg.targets : [];
-    // The suggested reps are for counted sets: the k-th row that isn't a
-    // warm-up gets the k-th target; a warm-up row gets none.
+    // The grey number in an empty reps box. A sheet opened as a copy of last
+    // time carries one per row (r.hint). Otherwise the suggested reps go to
+    // the counted sets: the k-th row that isn't a warm-up gets the k-th
+    // target; a warm-up row gets none.
+    var copied = d.rows.some(function (r) { return r.hint != null; });
     var counted = 0;
     var rows = d.rows.map(function (r, i) {
       var warm = !!r.warm;
-      var target = warm ? null : targets[counted++];
+      var target = copied ? (r.hint != null ? r.hint : null) : (warm ? null : targets[counted++]);
       return '<li class="gset' + (r.done ? " done" : "") + (warm ? " warm" : "") + '" data-i="' + i + '">' +
         '<button type="button" class="gnum" aria-pressed="' + warm + '" aria-label="Set ' + (i + 1) + ': warm-up, not counted"><span class="gchip">' + (warm ? "W" : i + 1) + "</span></button>" +
         (hasKg(ex)
@@ -2755,7 +2775,8 @@
       suggestionHTML(ex, sg) +
       '<ol class="gsets" aria-label="Sets">' + rows + "</ol>" +
       '<p class="hint gtip">Tick &#10003; each set as you finish it: it&#8217;s saved straight away' +
-      (targets.length ? ", and an empty " + repUnit(ex) + " box takes the suggested number" : "") + ". " +
+      (targets.length || copied ? ", and an empty " + repUnit(ex) + " box takes the grey number in it" : "") + ". " +
+      (copied ? "The rows are last time&#8217;s sets, with their weights and warm-ups. " : "") +
       "Tap a set&#8217;s number to make it <b>W</b>, a warm-up: it stays in the log but isn&#8217;t counted.</p>" +
       '<div class="btnrow"><button class="btn" id="gymAddSet" type="button">&#65291; Add set</button>' +
       (d.rows.length > 1 ? '<button class="btn" id="gymRemoveSet" type="button">Remove last set</button>' : "") + "</div>" +

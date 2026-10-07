@@ -51,7 +51,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v23";
+  var BUILD = "milo-v24";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -1273,20 +1273,22 @@ var TRAINING = (function () {
   // left out here. Otherwise a pyramid (20, 30, 40 kg) would come back as
   // "3 sets at 40 kg". For an entry without marks this changes nothing: the
   // old rule already left those sets out.
+  // Which sets of a session the next one is planned from, [true|false] per
+  // set: the counted sets, minus the build-up ones (see above).
+  function topBand(e, ex) {
+    var band = workingSets(e);
+    if (!filtersWarmups(ex)) return band;
+    var scores = e.sets.map(function (x, i) { return band[i] ? score(kgAt(e, i, ex), num(x)) : 0; });
+    var best = Math.max.apply(null, [0].concat(scores));
+    if (!(best > 0)) return band;
+    // s ≥ 0.8 × best, exactly (the same test workingSets uses).
+    return band.map(function (b, i) { return b && scores[i] * 5 >= best * 4; });
+  }
+
   function sessionTop(e, ex) {
-    var flags = workingSets(e), reps = [], kg = [];
-    e.sets.forEach(function (x, i) { if (flags[i]) { reps.push(num(x)); kg.push(kgAt(e, i, ex)); } });
+    var band = topBand(e, ex), reps = [], kg = [];
+    e.sets.forEach(function (x, i) { if (band[i]) { reps.push(num(x)); kg.push(kgAt(e, i, ex)); } });
     if (!reps.length) return null;
-    if (filtersWarmups(ex)) {
-      var scores = reps.map(function (r, i) { return score(kg[i], r); });
-      var best = Math.max.apply(null, scores);
-      if (best > 0) {
-        // s ≥ 0.8 × best, exactly (the same test workingSets uses).
-        var near = scores.map(function (s) { return s * 5 >= best * 4; });
-        reps = reps.filter(function (r, i) { return near[i]; });
-        kg = kg.filter(function (k, i) { return near[i]; });
-      }
-    }
     var W = ex.load === "assist" && ex.known ? Math.min.apply(null, kg) : Math.max.apply(null, kg);
     return {
       id: e.id, ts: timeOf(e), W: W, n: reps.length,
@@ -1419,6 +1421,50 @@ var TRAINING = (function () {
     return make("same", W, n, oneMore(last.at, n, hi));
   }
 
+  // The rows a new session's sheet opens with: a copy of the session the
+  // suggestion builds on, one row per set it had, in order —
+  //   [{ kg, warm, reps }]
+  //   kg    that set's weight; the sets at the old top weight get the
+  //         suggested one (heavier after "up", lighter after a long break
+  //         or a deload), and no other set is left heavier than that
+  //   warm  it was a warm-up (its mark, or the old rule's guess)
+  //   reps  the number to aim for: the suggestion's targets, in order, for
+  //         the sets the plan is made from (topBand); for warm-ups and
+  //         build-up sets, what was done last time
+  // So a pyramid comes back as a pyramid, warm-ups included, and only its
+  // top moves. Sets of 0 reps are left out. null when there is nothing to
+  // copy (first time, an exercise nobody knows, a time that isn't one):
+  // the sheet then opens with the suggestion's plain sets.
+  function planRows(exId, log, now, opts) {
+    var ex = exRec(exId), sg = suggest(exId, log, now, opts);
+    if (!ex || !sg || !sg.from) return null;
+    var o = (opts && typeof opts === "object") ? opts : {};
+    var day = null;
+    mergeDays(sessionsFor(log, exId, { before: Number(now), exclude: o.exclude })).forEach(function (s) {
+      if (!day && s.id === sg.from.id) day = s;
+    });
+    if (!day) return null;
+    var band = topBand(day, ex), marks = warmups(day), targets = sg.targets || [];
+    var lighter = ex.load === "assist" && ex.known;      // less help is the harder way there
+    var k = 0, rows = [];
+    day.sets.forEach(function (x, i) {
+      var r = num(x);
+      if (!(r > 0)) return;
+      var kg = kgAt(day, i, ex);
+      if (band[i]) {
+        if (kg === sg.from.kg) kg = sg.kg;
+        rows.push({ kg: kg, warm: false, reps: targets.length ? targets[Math.min(k, targets.length - 1)] : r });
+        k++;
+      } else {
+        rows.push({ kg: kg, warm: !!marks[i], reps: r });
+      }
+    });
+    rows.forEach(function (row) {
+      if (lighter ? row.kg < sg.kg : row.kg > sg.kg) row.kg = sg.kg;
+    });
+    return rows.length ? rows.slice(0, MODEL.CAPS ? MODEL.CAPS.setsPerEntry : 30) : null;
+  }
+
   useExercises([]);
 
   /* ---------- Display ---------- */
@@ -1489,6 +1535,7 @@ var TRAINING = (function () {
     lastSession: lastSession,
     best: best,
     suggest: suggest,
+    planRows: planRows,
     LOADS: LOADS,
     HELPER_WEIGHT: HELPER_WEIGHT,
     WARMUP_SHARE: WARMUP_SHARE,
