@@ -11,8 +11,10 @@
    which skills feed it, and the one nudge. And the gym: the
    exercises (the catalogue plus your own), which sets were
    warm-ups, e1RM, one exercise's history and best set, and the
-   double-progression suggestion for its next session. Data only:
-   the words the app shows are app.js's.
+   double-progression suggestion for its next session. And
+   progress: records, each exercise's chart, each muscle group's
+   gym exercises, body weight, and the axis a line chart is drawn
+   on. Data only: the words the app shows are app.js's.
 
    Pure functions over plain values: no DOM, no storage, and no
    clock — whoever needs "this week" passes the time in — so
@@ -51,7 +53,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v24";
+  var BUILD = "milo-v25";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -1465,6 +1467,541 @@ var TRAINING = (function () {
     return rows.length ? rows.slice(0, MODEL.CAPS ? MODEL.CAPS.setsPerEntry : 30) : null;
   }
 
+  /* ---------- Progress: records, trends, main lifts ---------- */
+
+  // How far back "records in the last 30 days" and a group's lifts (8 weeks)
+  // look — calendar days, today included — and how many sessions a chart shows.
+  var RECORD_DAYS = 30;
+  var LIFT_DAYS = 56;
+  var TREND_SESSIONS = 20;
+  // An estimated 1-rep max says little above this many reps: an exercise
+  // whose range goes higher is charted by its top weight instead.
+  var E1RM_MAX_HI = 15;
+
+  // Ids and names from stored data: anything that isn't a string counts as "".
+  function cmpStr(a, b) {
+    a = typeof a === "string" ? a : ""; b = typeof b === "string" ? b : "";
+    return a < b ? -1 : (a > b ? 1 : 0);
+  }
+
+  // The catalogue's own order (data.js lists each group's big movement
+  // first), for ties between lifts. Your own exercises come after.
+  var CAT_ORDER = dict();
+  CATALOGUE.forEach(function (x, i) { if (x && typeof x.id === "string") CAT_ORDER[x.id] = i; });
+
+  /* A RECORD, in one sentence: a heavier weight than ever before, in a set
+     no more than two reps short of the fewest the exercise aims for; with
+     no weight on, more reps in one set than ever (a hold: the next 5
+     seconds).
+
+     Exactly, per exercise, day by day (a day = every entry of the exercise
+     on one calendar day; counted sets only — each entry's own
+     workingSets(), so a set History shows as a warm-up is never a record):
+
+     Two marks are kept. The first day that has something to measure sets
+     each one silently: it is what there is to beat, never a record.
+
+       the WEIGHT mark (not for bodyweight-only or timed exercises)
+         A set is in when it has weight on and at least recordFloor(ex)
+         reps: lo − 2, the fewest suggest() ever asks for (after a big step up),
+         so doing what the sheet says on the day the weight goes up always
+         counts — and a heavy single in an 8–12 exercise never does. One
+         floor for every set, whatever came before, so the same set can't
+         count on one day and not on another. With added weight, bodyweight
+         alone for that many reps is in as weight 0; on an assisted machine
+         no help at all is in whatever the reps (the hardest there is). An
+         external weight logged as 0 kg is out: there is nothing to compare.
+         The day's hardest such set (heavier; assisted: less help) is a
+         record when it is harder than the mark. More reps at the same
+         weight is not: that would be a record nearly every session.
+
+       the REPS mark (bodyweight-only and timed exercises; added weight and
+       assisted sets done with no weight on)
+         The day's most reps in such a set is a record when it beats the most
+         reps of every earlier day's sets that were at least as hard. With
+         added weight that includes the weighted ones: 10 reps with 5 kg on
+         blocks a later 10 without — and it makes a first set without weight
+         a record when it beats them, although no earlier set had none on.
+         (So what such a set has to beat can be more than the mark `r`,
+         which is the best set WITHOUT weight.) A hold has to reach the
+         next TIMED_STEP seconds: 44 after 40 is not one, 45 is.
+
+     A day has one record at most: the weight one when both happen. Sets
+     under the floor are neither records nor in anyone's way. Everything
+     is derived from the log every time — nothing is stored — so a session
+     logged late for an earlier day, a W mark, or a changed rep range can
+     move records, and every device works out the same ones. */
+
+  // Everything the records, the charts and the lifts read, from ONE pass
+  // over the log. app.js builds it once per refresh and hands it to the
+  // functions below (each also takes a plain log and builds its own).
+  //   { byEx, records, byEntry }
+  //   byEx     { exId: { days, w, r, records } } for every exercise that
+  //            resolves and has a counted set
+  //     days     its session days, oldest first — a calendar day with at
+  //              least one counted set:
+  //              { day "YYYY-MM-DD", ts (its latest entry's), n (counted
+  //                sets), top, e1, rec, w, r }
+  //                top  the day's top set { kg, reps, id, i }: the hardest
+  //                     weight, then the most reps (reps only where weight
+  //                     doesn't count)
+  //                e1   the day's best estimated 1-rep max
+  //                     { kg, reps, value }, external weight only; else null
+  //                rec  the day's record, or null
+  //                w, r the two marks as they stood after that day
+  //     w, r     the marks now: { kg, reps, ts, id, i } or null. w is the
+  //              hardest weight (with the most reps done at it), r the most
+  //              reps with no weight on.
+  //     records  its records, oldest first
+  //   records  every record, oldest first (same time: by exercise id):
+  //            { exId, day, ts, id, i, kg, reps, by }
+  //              id, i  the entry that holds the set, and the set's place in it
+  //              by     "kg" (a weight record) or "reps"
+  //   byEntry  { entry id: its record }, for marking a row in History
+  // Entries of exercises nobody knows, with no usable time or no counted
+  // set are left out. The same log in any order gives the same answer.
+  // The indexes gymIndex() itself made: nothing else is taken for one.
+  var MADE = new WeakSet();
+  function gymIndex(log) {
+    var byEx = dict(), byEntry = dict(), all = [];
+    var out = { byEx: byEx, records: all, byEntry: byEntry };
+    MADE.add(out);
+    if (!Array.isArray(log)) return out;
+    var buckets = dict();
+    log.forEach(function (e) {
+      if (!e || typeof e !== "object" || e.kind !== "gym" || !Array.isArray(e.sets)) return;
+      var t = timeOf(e);
+      if (!(t > 0) || !exRec(e.exId)) return;
+      var b = buckets[e.exId] || (buckets[e.exId] = { list: [], sorted: true });
+      var prev = b.list.length ? b.list[b.list.length - 1] : null;
+      // A stored log is in order already (sortLog: time, then id).
+      if (prev && (t < prev.t || (t === prev.t && cmpStr(e.id, prev.e.id) < 0))) b.sorted = false;
+      b.list.push({ e: e, t: t });
+    });
+    Object.keys(buckets).forEach(function (exId) {
+      var b = buckets[exId];
+      if (!b.sorted) b.list.sort(function (x, y) { return (x.t - y.t) || cmpStr(x.e.id, y.e.id); });
+      var rec = walkExercise(exRec(exId), b.list);
+      if (!rec.days.length) return;
+      byEx[exId] = rec;
+      rec.records.forEach(function (r) { all.push(r); byEntry[r.id] = r; });
+    });
+    all.sort(function (a, b) { return (a.ts - b.ts) || cmpStr(a.exId, b.exId); });
+    return out;
+  }
+
+  // The fewest reps a weighted set needs to count for a record: two under
+  // the bottom of the exercise's range, 1 at least. 0 where weight doesn't
+  // count (bodyweight only, timed) and for an exercise nobody knows.
+  function recordFloor(ex) {
+    if (!ex || weightMode(ex) === "reps") return 0;
+    return Math.max(1, ex.lo - BIG_JUMP_REPS);
+  }
+
+  // One exercise's entries (in time order) as days, marks and records.
+  function walkExercise(ex, list) {
+    var mode = weightMode(ex), added = mode === "load" && ex.load === "added";
+    var days = [], records = [];
+    var w = null, r = null, bar = null, cur = null;
+    var floor = recordFloor(ex);
+    var harder = function (a, b) { return mode === "assist" ? a < b : a > b; };
+    var mark = function (s) { return { kg: s.kg, reps: s.reps, ts: s.ts, id: s.id, i: s.i }; };
+    var inWeight = function (s) {
+      if (s.kg > 0) return s.reps >= floor;
+      return added ? s.reps >= floor : mode === "assist";
+    };
+    var close = function () {
+      var sets = cur.sets;
+      if (!sets.length) return;                      // warm-ups only: not a session
+      var top = null, e1 = null, bestW = null, bestR = null, most = 0, rec = null;
+      sets.forEach(function (s) {
+        if (!top || (mode === "reps" ? s.reps > top.reps : (harder(s.kg, top.kg) || (s.kg === top.kg && s.reps > top.reps)))) top = s;
+        if (mode === "reps") {
+          if (!bestR || s.reps > bestR.reps) bestR = s;
+          if (s.reps > most) most = s.reps;
+          return;
+        }
+        if (ex.load === "ext") {
+          var sc = score(s.kg, s.reps);
+          if (sc > 0 && (!e1 || sc > e1.sc)) e1 = { kg: s.kg, reps: s.reps, sc: sc };
+        }
+        if (inWeight(s) && (!bestW || harder(s.kg, bestW.kg) || (s.kg === bestW.kg && s.reps > bestW.reps))) bestW = s;
+        if (ex.load !== "ext" && !(s.kg > 0) && (!bestR || s.reps > bestR.reps)) bestR = s;
+        // What a later set without weight has to beat: with added weight
+        // every set, on an assisted machine only the unassisted ones.
+        if ((added || (mode === "assist" && !(s.kg > 0))) && s.reps > most) most = s.reps;
+      });
+      if (bestW) {
+        if (w && harder(bestW.kg, w.kg)) rec = { set: bestW, by: bestW.kg > 0 ? "kg" : "reps" };
+        if (!w || harder(bestW.kg, w.kg) || (bestW.kg === w.kg && bestW.reps > w.reps)) w = mark(bestW);
+      }
+      if (bestR) {
+        var beats = bar !== null && (ex.timed ? Math.floor(bestR.reps / TIMED_STEP) > Math.floor(bar / TIMED_STEP) : bestR.reps > bar);
+        if (beats && !rec) rec = { set: bestR, by: "reps" };
+        if (!r || bestR.reps > r.reps) r = mark(bestR);
+      }
+      if (most > 0 && (bar === null || most > bar)) bar = most;
+      var out = null;
+      if (rec) {
+        out = { exId: ex.id, day: cur.day, ts: rec.set.ts, id: rec.set.id, i: rec.set.i, kg: rec.set.kg, reps: rec.set.reps, by: rec.by };
+        records.push(out);
+      }
+      days.push({
+        day: cur.day, ts: cur.ts, n: sets.length,
+        top: { kg: top.kg, reps: top.reps, id: top.id, i: top.i },
+        e1: e1 ? { kg: e1.kg, reps: e1.reps, value: e1.sc / 30 } : null,
+        rec: out, w: w, r: r
+      });
+    };
+    list.forEach(function (x) {
+      var e = x.e, key = dateStr(x.t);
+      if (!cur || cur.day !== key) {
+        if (cur) close();
+        cur = { day: key, ts: x.t, sets: [] };
+      }
+      cur.ts = x.t;
+      var flags = workingSets(e);
+      for (var i = 0; i < e.sets.length; i++) {
+        if (flags[i]) cur.sets.push({ kg: kgAt(e, i, ex), reps: num(e.sets[i]), ts: x.t, id: e.id, i: i });
+      }
+    });
+    if (cur) close();
+    return { days: days, w: w, r: r, records: records };
+  }
+
+  // A log, or the index gymIndex() already built from it. Anything else —
+  // an object that only looks like an index too — counts as an empty log.
+  function asIndex(x) {
+    return (x && typeof x === "object" && MADE.has(x)) ? x : gymIndex(x);
+  }
+  function exIndex(x, exId) {
+    var idx = asIndex(x);
+    return typeof exId === "string" && Object.prototype.hasOwnProperty.call(idx.byEx, exId) ? idx.byEx[exId] : null;
+  }
+
+  // Every record in a log (or an index), oldest first. See gymIndex().
+  function records(x) { return asIndex(x).records; }
+
+  // The records of the last `days` calendar days, today included (History's
+  // "records in the last 30 days"), oldest first. Days after today don't
+  // count. days: RECORD_DAYS unless given.
+  function recordsIn(x, now, days) {
+    if (!validTime(now)) return [];
+    var n = (days === null || days === undefined) ? RECORD_DAYS : Math.round(Number(days));
+    if (!(n >= 1)) return [];
+    return records(x).filter(function (r) {
+      var ago = dayDelta(r.ts, Number(now));
+      return ago >= 0 && ago < n;
+    });
+  }
+
+  // What there is to beat in an exercise: { w, r, show }
+  //   w, r   the weight mark and the reps mark (see gymIndex), or null
+  //   show   the one to put on screen: the weight mark when it has weight
+  //          on, else the reps mark, else the weight mark; null when none
+  // before (a time): as things stood before the calendar day containing it,
+  // for a sheet that is logging that day. Without it: as they stand now.
+  function standing(x, exId, before) {
+    var rec = exIndex(x, exId), w = null, r = null;
+    if (rec) {
+      if (before === undefined || before === null) { w = rec.w; r = rec.r; }
+      else if (validTime(before)) {
+        var until = dayStart(Number(before));
+        for (var k = rec.days.length - 1; k >= 0; k--) {
+          if (rec.days[k].ts < until) { w = rec.days[k].w; r = rec.days[k].r; break; }
+        }
+      }
+    }
+    return { w: w, r: r, show: (w && w.kg > 0) ? w : (r || w) };
+  }
+
+  // An exercise's chart: its last `max` session days (TREND_SESSIONS unless
+  // given), oldest first —
+  //   { kind, points: [{ day, ts, value, kg, reps, record }] }
+  //   kind   decided on the days shown:
+  //          "secs"    a timed exercise: the longest hold of the day
+  //          "reps"    weight doesn't count, or no set of those days had
+  //                    weight on: the most reps in one set
+  //          "e1rm"    external weight, range up to E1RM_MAX_HI reps: the
+  //                    day's best estimated 1-rep max
+  //          "kg"      external weight with a higher range, and added
+  //                    weight: the day's top weight (0 = bodyweight alone)
+  //          "assist"  an assisted machine: the least help of the day
+  //   value  what is plotted; kg and reps are the set it comes from
+  //   record that day has a record of the chart's kind (a weight record on
+  //          the weight charts, a reps record on the other two; any record
+  //          on the help chart)
+  // Days without a weighted set are left out of "e1rm" (and of "kg" for
+  // an external weight). An exercise nobody knows, or never logged:
+  // { kind: null, points: [] }.
+  function trend(x, exId, max) {
+    var rec = exIndex(x, exId), ex = exRec(exId), out = { kind: null, points: [] };
+    if (!rec || !ex) return out;
+    var n = (max === null || max === undefined) ? TREND_SESSIONS : Math.round(Number(max));
+    if (!(n >= 1)) n = TREND_SESSIONS;
+    var mode = weightMode(ex), days = rec.days.slice(-n);
+    var weighted = mode !== "reps" && days.some(function (d) { return d.top.kg > 0; });
+    var kind = ex.timed ? "secs" : (!weighted ? "reps"
+      : (mode === "assist" ? "assist" : (ex.load === "ext" && ex.hi <= E1RM_MAX_HI ? "e1rm" : "kg")));
+    var byWeight = kind === "e1rm" || kind === "kg" || kind === "assist";
+    days.forEach(function (d) {
+      // (The first day with no help at all is a record "by reps": on the
+      // help chart it is the biggest step there is.)
+      var p = { day: d.day, ts: d.ts, value: 0, kg: d.top.kg, reps: d.top.reps, record: !!d.rec && (kind === "assist" || (d.rec.by === "kg") === byWeight) };
+      if (kind === "e1rm") {
+        if (!d.e1) return;
+        p.value = d.e1.value; p.kg = d.e1.kg; p.reps = d.e1.reps;
+      } else if (kind === "kg" || kind === "assist") {
+        if (ex.load === "ext" && !(d.top.kg > 0)) return;
+        p.value = d.top.kg;
+      } else {
+        p.value = d.top.reps;
+      }
+      out.points.push(p);
+    });
+    out.kind = kind;
+    return out;
+  }
+
+  // The gym exercises each muscle group was trained with in the last
+  // LIFT_DAYS calendar days (today included; later days ignored), the main
+  // one first:
+  //   { group: [{ exId, days, sets, ts, day, kg, reps, id, record }] }
+  //   days, sets  its session days and counted sets in those weeks
+  //   ts … id     its latest session there: the day's time and top set —
+  //               or, when that session set a record, the record's set
+  //   record      that session set a record
+  // Order: the most session days; then the lower rep range (the heavier
+  // movement: squats before calf raises; exercises without weight after
+  // those with); then the most sets; then the catalogue's order, your own
+  // exercises last by name. Every exercise
+  // whose own group it is, deleted and retired ones too; never one nobody
+  // knows. All six keys, each a list ([] when there is none).
+  function lifts(x, now) {
+    var out = {};
+    GROUPS.forEach(function (g) { out[g] = []; });
+    if (!validTime(now)) return out;
+    var idx = asIndex(x), t = Number(now);
+    Object.keys(idx.byEx).forEach(function (exId) {
+      var ex = exRec(exId);
+      if (!ex || !isGroup(ex.p)) return;
+      var days = idx.byEx[exId].days, n = 0, sets = 0, last = null;
+      for (var k = days.length - 1; k >= 0; k--) {
+        var ago = dayDelta(days[k].ts, t);
+        if (!(ago >= 0)) continue;
+        if (ago >= LIFT_DAYS) break;
+        n++; sets += days[k].n;
+        if (!last) last = days[k];
+      }
+      if (!last) return;
+      // On a record day the set shown is the record itself: the day's top
+      // set can be a heavier one under the floor, which is no record.
+      var shown = last.rec || last.top;
+      out[ex.p].push({
+        exId: exId, days: n, sets: sets, ts: last.ts, day: last.day,
+        kg: shown.kg, reps: shown.reps, id: shown.id, record: !!last.rec
+      });
+    });
+    var place = function (id) { return Object.prototype.hasOwnProperty.call(CAT_ORDER, id) ? CAT_ORDER[id] : Infinity; };
+    // The bottom of the range, where it says how heavy a movement is: not
+    // for bodyweight-only and timed exercises (20 seconds isn't 20 reps),
+    // which come after the weighted ones on a tie.
+    var heavy = function (ex) { return weightMode(ex) === "reps" ? Infinity : ex.lo; };
+    var cmpNum = function (a, b) { return a === b ? 0 : (a < b ? -1 : 1); };
+    GROUPS.forEach(function (g) {
+      out[g].sort(function (a, b) {
+        var xa = exRec(a.exId), xb = exRec(b.exId), pa = place(a.exId), pb = place(b.exId);
+        return (b.days - a.days) || cmpNum(heavy(xa), heavy(xb)) || (b.sets - a.sets) ||
+          (pa === pb ? 0 : (pa < pb ? -1 : 1)) ||
+          cmpStr(String(xa.name).toLowerCase(), String(xb.name).toLowerCase()) || cmpStr(a.exId, b.exId);
+      });
+    });
+    return out;
+  }
+
+  /* ---------- Body weight ---------- */
+
+  // What a weigh-in can hold (model.js, sanitizeBody).
+  var WEIGH_MIN = 20, WEIGH_MAX = 300, WAIST_MIN = 30, WAIST_MAX = 250;
+  // The chart shows from your first weigh-in to today: at least 4 weeks
+  // wide, at most 12.
+  var WEIGH_CHART_MIN = 28, WEIGH_CHART_MAX = 84;
+  // "About a month": the weigh-in nearest 28 days before the latest one,
+  // if there is one 21 to 35 days before it.
+  var MONTH_DAYS = 28, MONTH_SLACK = 7;
+  // "Since your first weigh-in" needs this many days between the two.
+  var FIRST_DAYS = 14;
+  // A 7-day average is only called one from this many weigh-in days.
+  var AVG_DAYS = 3;
+  // Waist: compared with the oldest measure of the 12 weeks before the
+  // latest, if that is at least 2 weeks older.
+  var WAIST_LOOKBACK = 84, WAIST_MIN_GAP = 14;
+
+  // Nearest whole number, halves away from zero (so −0.35 and 0.35 round
+  // alike: Math.round alone would give −0.3 and 0.4).
+  function roundAway(x) { return x < 0 ? -Math.round(-x) : Math.round(x); }
+
+  // The weigh-ins up to the end of today as ONE value per calendar day,
+  // oldest first: the day's weigh-in that is last by time, then by id (two
+  // devices can each save one for the same day; nothing is ever merged
+  // away). [{ ts, id, kg, waist, tenths }]
+  function weighDays(log, now) {
+    var end = nextDay(now), by = dict(), out = [];
+    if (!Array.isArray(log)) return out;
+    log.forEach(function (e) {
+      if (!e || typeof e !== "object" || e.kind !== "body") return;
+      var t = timeOf(e), kg = num(e.kg);
+      if (!(t < end) || !(kg >= WEIGH_MIN && kg <= WEIGH_MAX)) return;
+      var k = dateStr(t), cur = by[k];
+      if (cur && (t < cur.ts || (t === cur.ts && cmpStr(e.id, cur.id) <= 0))) return;
+      var waist = num(e.waist);
+      by[k] = { ts: t, id: e.id, kg: kg, waist: (waist >= WAIST_MIN && waist <= WAIST_MAX) ? waist : null, tenths: Math.round(kg * 10) };
+    });
+    Object.keys(by).forEach(function (k) { out.push(by[k]); });
+    return out.sort(function (a, b) { return a.ts - b.ts; });
+  }
+
+  // Body weight, for the Body card, its sheet and the weigh-in form.
+  // Every number hangs on the LATEST weigh-in, not on today, so nothing
+  // changes on a day you didn't weigh yourself; `now` only says how long
+  // ago that was, where the chart ends, and which weigh-ins haven't
+  // happened yet (days after today are ignored).
+  //   count      days with a weigh-in
+  //   last       the latest { ts, id, kg, waist }; prev the day before it
+  //              that has one; first the earliest. null when there is none.
+  //   daysSince  whole calendar days from the latest to now
+  //   change     last.kg − prev.kg (to 0.1), or null
+  //   month      { change, ts, avg }: the level at the latest weigh-in
+  //              against the level at the weigh-in nearest 28 days before
+  //              it (21 to 35; a tie goes to the earlier), ts that
+  //              weigh-in's. A "level" is the average of the weigh-ins of
+  //              the 7 calendar days ending that day when there are 3 or
+  //              more, else that day's own weigh-in — so for a weigh-in a
+  //              week it is simply one reading against the other. avg: an
+  //              average is on either side. null without such a day.
+  //   sinceFirst { change, ts }: last against the first weigh-in, only
+  //              while there is no month, the first is 14 days or more
+  //              before the latest and isn't `prev`
+  //   avg7       { kg, n }: the level at the latest weigh-in, only when its
+  //              7 days hold 3 weigh-in days or more
+  //   waist      { last, ref, change }: the latest waist { cm, ts }; ref the
+  //              oldest one of the 12 weeks before it that is 2 weeks or
+  //              more older; change last − ref to the nearest 0.5 cm
+  //   chart      { days, from, points: [{ ts, kg, avg, n }], split }: the
+  //              window (from your first weigh-in to today, 28 to 84 days
+  //              ending today; `from` its first midnight) and the weigh-in
+  //              days in it with each one's level (avg, over n days: it
+  //              looks back before the window too). split: some level is a
+  //              real average, so the line isn't just the dots.
+  // Weights are added up in whole tenths, so 72.3 and 72.4 average 72.4
+  // (72.35 rounded half up) and a difference is exact.
+  function bodyWeight(log, now) {
+    var out = {
+      count: 0, last: null, prev: null, first: null, daysSince: null, change: null, month: null, sinceFirst: null, avg7: null,
+      waist: { last: null, ref: null, change: null },
+      chart: { days: WEIGH_CHART_MIN, from: NaN, points: [], split: false }
+    };
+    if (!validTime(now)) return out;
+    var t = Number(now), days = weighDays(log, t), n = days.length;
+    var pub = function (d) { return { ts: d.ts, id: d.id, kg: d.kg, waist: d.waist }; };
+    // The level at day i, in tenths (not rounded), and how many days it
+    // averages: the weigh-ins of the 7 calendar days ending that day when
+    // there are AVG_DAYS of them or more — else that day's own weigh-in (n 1):
+    // two readings are not an average, and a number worked out from them
+    // couldn't be checked against anything on screen.
+    var level = function (i) {
+      var sum = 0, k = 0;
+      for (var j = i; j >= 0 && dayDelta(days[j].ts, days[i].ts) <= 6; j--) { sum += days[j].tenths; k++; }
+      return k >= AVG_DAYS ? { tenths: sum / k, n: k } : { tenths: days[i].tenths, n: 1 };
+    };
+    out.count = n;
+    if (n) {
+      var L = days[n - 1], lv = level(n - 1);
+      out.last = pub(L);
+      out.first = pub(days[0]);
+      out.daysSince = Math.max(0, dayDelta(L.ts, t));
+      if (n > 1) {
+        out.prev = pub(days[n - 2]);
+        out.change = (L.tenths - days[n - 2].tenths) / 10;
+      }
+      var pick = -1, off = Infinity;
+      for (var i = n - 2; i >= 0; i--) {
+        var ago = dayDelta(days[i].ts, L.ts);
+        if (ago > MONTH_DAYS + MONTH_SLACK) break;
+        if (ago < MONTH_DAYS - MONTH_SLACK) continue;
+        if (Math.abs(ago - MONTH_DAYS) <= off) { off = Math.abs(ago - MONTH_DAYS); pick = i; }   // <=: a tie goes to the earlier
+      }
+      if (pick !== -1) {
+        var then = level(pick);
+        out.month = { change: roundAway(lv.tenths - then.tenths) / 10, ts: days[pick].ts, avg: lv.n > 1 || then.n > 1 };
+      }
+      else if (n > 2 && dayDelta(days[0].ts, L.ts) >= FIRST_DAYS) out.sinceFirst = { change: (L.tenths - days[0].tenths) / 10, ts: days[0].ts };
+      if (lv.n > 1) out.avg7 = { kg: Math.round(lv.tenths) / 10, n: lv.n };
+
+      var wi = -1;
+      for (var a = n - 1; a >= 0 && wi === -1; a--) if (days[a].waist !== null) wi = a;
+      if (wi !== -1) {
+        out.waist.last = { cm: days[wi].waist, ts: days[wi].ts };
+        for (var b = 0; b < wi; b++) {
+          var gap = dayDelta(days[b].ts, days[wi].ts);
+          if (days[b].waist === null || gap > WAIST_LOOKBACK) continue;
+          if (gap < WAIST_MIN_GAP) break;
+          out.waist.ref = { cm: days[b].waist, ts: days[b].ts };
+          out.waist.change = roundAway((days[wi].waist - days[b].waist) * 2) / 2 + 0;
+          break;
+        }
+      }
+    }
+    var span = n ? dayDelta(days[0].ts, t) + 1 : WEIGH_CHART_MIN;
+    span = Math.max(WEIGH_CHART_MIN, Math.min(WEIGH_CHART_MAX, span));
+    var from = addDays(startOfDay(t), -(span - 1)).getTime();
+    out.chart.days = span;
+    out.chart.from = from;
+    days.forEach(function (d, i2) {
+      if (d.ts < from) return;
+      var l = level(i2);
+      out.chart.points.push({ ts: d.ts, kg: d.kg, avg: Math.round(l.tenths) / 10, n: l.n });
+      if (l.n > 1) out.chart.split = true;
+    });
+    return out;
+  }
+
+  /* ---------- Charts ---------- */
+
+  // A y-axis for a line chart whose values run from min to max:
+  //   { lo, hi, step, ticks }   2 to 4 whole-number ticks, lo ≥ 0, hi > lo
+  // The axis does NOT start at zero (72 kg would be a flat line at the top)
+  // and is never shorter than minSpan, so a 0.3 kg wobble isn't drawn as a
+  // cliff: a narrower range is widened around its middle. Anything that
+  // isn't a number gives a plain 0–2 axis rather than NaN.
+  var CHART_STEPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+  function chartScale(min, max, minSpan) {
+    var a = Number(min), b = Number(max), span = Number(minSpan);
+    if (!isFinite(span) || !(span > 0)) span = 2;
+    if (min === null || max === null || !isFinite(a) || !isFinite(b)) { a = 0; b = 0; }
+    if (a > b) { var t = a; a = b; b = t; }
+    if (b - a < span) {
+      // Around the nearest whole number, so 72.1–72.6 with 4 to show reads
+      // 70–74 rather than 70–76; never cutting the data off.
+      var mid = Math.round((a + b) / 2);
+      a = Math.min(a, mid - span / 2); b = Math.max(b, mid + span / 2);
+    }
+    if (a < 0) { b -= a; a = 0; }
+    for (var i = 0; i < CHART_STEPS.length; i++) {
+      var step = CHART_STEPS[i];
+      // The 1e-9s keep 72.00000000000001 from costing a whole extra step.
+      var lo = Math.floor(a / step + 1e-9) * step, hi = Math.ceil(b / step - 1e-9) * step;
+      var n = Math.round((hi - lo) / step);
+      if (n >= 1 && n <= 3) {
+        var ticks = [];
+        for (var k = 0; k <= n; k++) ticks.push(lo + k * step);
+        return { lo: lo, hi: hi, step: step, ticks: ticks };
+      }
+    }
+    var top = Math.ceil(b / 5000) * 5000;
+    return { lo: 0, hi: top, step: top, ticks: [0, top] };
+  }
+
   useExercises([]);
 
   /* ---------- Display ---------- */
@@ -1536,6 +2073,21 @@ var TRAINING = (function () {
     best: best,
     suggest: suggest,
     planRows: planRows,
+    gymIndex: gymIndex,
+    records: records,
+    recordsIn: recordsIn,
+    recordFloor: function (exId) { return recordFloor(exRec(exId)); },
+    standing: standing,
+    trend: trend,
+    lifts: lifts,
+    bodyWeight: bodyWeight,
+    chartScale: chartScale,
+    lastTrainedAll: lastTrainedAll,
+    RECORD_DAYS: RECORD_DAYS,
+    LIFT_DAYS: LIFT_DAYS,
+    TREND_SESSIONS: TREND_SESSIONS,
+    E1RM_MAX_HI: E1RM_MAX_HI,
+    TIMED_STEP: TIMED_STEP,
     LOADS: LOADS,
     HELPER_WEIGHT: HELPER_WEIGHT,
     WARMUP_SHARE: WARMUP_SHARE,

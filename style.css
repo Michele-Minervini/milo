@@ -2045,3 +2045,48 @@ body.pill-on #sheet .sheet-body { padding-bottom: calc(24px + env(safe-area-inse
   .gtick { width: 40px; height: 40px; }
   .gpane-bw .gset { grid-template-columns: 40px minmax(2.6rem, 1fr) 40px; }
 }
+
+/* ---------- P5: records, line charts, body weight ---------- */
+.bwcard { width: 100%; }
+.bwcard .gr-name .ico { margin-right: -2px; }
+.bw-add { color: var(--accent); font-size: 0.9rem; font-weight: 700; }
+.glast + .glast { margin-top: 2px; }
+.hitem .hrec { font-size: 0.78rem; font-weight: 650; color: var(--ink-2); }
+.wclash { margin: 8px 2px 0; }
+.wclash[hidden] { display: none; }
+.weighpane .volrow { margin-top: 10px; }
+.weighpane .bwkg { width: 5.6rem; font-size: 1.25rem; }
+.weighpane .bwwaist { width: 5.6rem; }
+.weightsheet p { font-size: 0.88rem; color: var(--ink-2); margin: 6px 0; }
+.weightsheet .stdtable { margin-top: 10px; }
+.settings .syncspace { margin: 10px 0 0; }
+/* Their footers stay at the bottom while there is little to show. */
+.sheet-body.weightsheet, .sheet-body.whatsnew { flex: 1 1 auto; }
+
+/* A line chart (app.js, lineChartSVG): the 8-week chart's frame and type
+   sizes. The line is the group's colour mixed towards the ink, so yellow
+   and mint still read on a phone in a bright gym (plain ink-2 where the
+   browser can't mix colours). */
+.lc { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 10px 4px 6px; }
+.lc svg { display: block; width: 100%; max-width: 420px; height: auto; margin: 0 auto; overflow: visible; }
+.lc .grid { stroke: var(--grid); stroke-width: 1; }
+.lc .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.lc .line { fill: none; stroke: var(--ink-2); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.lc .line.gap { stroke-width: 1.5; stroke-dasharray: 0.1 5; }
+.lc .dot { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.5; }
+/* Behind @supports: a second "stroke" using var() would be accepted by a
+   browser without color-mix and then drawn as no line at all. */
+@supports (color: color-mix(in srgb, red, blue)) {
+  .lc .line, .lc .dot { stroke: color-mix(in srgb, var(--area, var(--accent)) 70%, var(--ink)); }
+}
+.lc .dot.big { fill: var(--ink); stroke: var(--surface); }
+.lc .dot.raw { fill: var(--muted); stroke: none; }
+.lc .vlbl { fill: var(--ink); font-size: 11.5px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.lc .hit { fill: transparent; }
+p.lc-cap { margin: 6px 2px 0; font-size: 0.8rem; color: var(--muted); line-height: 1.45; }
+.lc-legend { justify-content: flex-start; margin: 6px 2px 0; }
+.lg-rec { width: 9px; height: 9px; border-radius: 50%; background: var(--ink); }
+.lg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.lg-avg { width: 16px; border-top: 2px solid var(--ink-2); border-top-color: color-mix(in srgb, var(--area, var(--accent)) 70%, var(--ink)); }
+.lg-gap { width: 16px; border-top: 2px dotted var(--ink-2); border-top-color: color-mix(in srgb, var(--area, var(--accent)) 70%, var(--ink)); }
+.sheet-body.history > .chips { margin-bottom: 14px; }

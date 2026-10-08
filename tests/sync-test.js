@@ -134,5 +134,25 @@ function page(db) {
     check("a stale tab can't resurrect sync that was turned off", SYNC.markSynced(mine, 10) === false && SYNC.getConfig() === null);
   }
 
+  section("sync space: the meter and the gate use the same measure");
+  {
+    const db = fakeFirebase(); const SYNC = page(db).get("SYNC");
+    const puts = () => db.calls.filter(c => c.indexOf("PUT") === 0).length;
+    check("the limit is 900,000 characters", SYNC.MAX_BLOB === 900000);
+    const st = { v: 6, pad: "\u00e9".repeat(1000) };
+    check("usage is the length of the state's JSON, against that limit", SYNC.usage(st).used === JSON.stringify(st).length && SYNC.usage(st).max === 900000);
+    const fit = { pad: "" };
+    fit.pad = "x".repeat(900000 - JSON.stringify(fit).length);
+    check("(a state of exactly 900,000 characters)", JSON.stringify(fit).length === 900000);
+    await SYNC.push(cfg(), fit, null);
+    check("exactly at the limit is written", puts() === 1);
+    fit.pad += "x";
+    let err = null;
+    try { await SYNC.push(cfg(), fit, null); } catch (e) { err = e; }
+    check("one character over is refused as \"full\", before any network call", !!err && err.kind === "full" && puts() === 1);
+    const loop = {}; loop.me = loop;
+    check("something that can't be written as JSON measures 0 rather than throwing", SYNC.usage(loop).used === 0);
+  }
+
   h.done(__filename);
 })();

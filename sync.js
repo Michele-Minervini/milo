@@ -33,7 +33,7 @@ var SYNC = (function () {
   // code must never travel inside a backup file or a shared progress link.
   var CONFIG_KEY = "bigsix.sync";
   var TIMEOUT_MS = 15000;
-  var BUILD = "milo-v24";
+  var BUILD = "milo-v25";
 
   // The cloud record since data v5, next to the old one at plain <code>. The
   // name stays across data versions (v6 writes it too): a device still on an
@@ -230,10 +230,22 @@ var SYNC = (function () {
   // Writes the state. When an etag is supplied the write is conditional, so a
   // change another device made in the meantime can't be silently clobbered —
   // a 412 comes back instead and the caller re-pulls, re-merges and retries.
+  // How much of the room one record has is in use: the measure push() itself
+  // refuses on (the length of the JSON text), so the meter in Settings and
+  // the gate can't drift apart.
+  function usage(stateObj) {
+    var used = 0;
+    try { used = JSON.stringify(stateObj).length; } catch (e) { used = 0; }
+    return { used: used, max: MAX_BLOB };
+  }
+
   function push(cfg, stateObj, etag) {
     var blob = JSON.stringify(stateObj);
     if (blob.length > MAX_BLOB) {
-      return Promise.reject(new Error("Your data got too big to sync."));
+      // Before any network call. kind "full": the app says what still works.
+      var full = new Error("Your data is too big to sync.");
+      full.kind = "full";
+      return Promise.reject(full);
     }
     var headers = { "Content-Type": "application/json" };
     if (etag) headers["if-match"] = etag;
@@ -266,6 +278,8 @@ var SYNC = (function () {
     parsePairing: parsePairing,
     pull: pull,
     push: push,
+    usage: usage,
+    MAX_BLOB: MAX_BLOB,
     // The merge lives with the rest of the data model; kept here so callers
     // and tests that know it as SYNC.merge keep working.
     merge: function (local, remote) { return MODEL.merge(local, remote); },

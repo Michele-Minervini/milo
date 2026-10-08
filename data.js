@@ -8,7 +8,7 @@
    ============================================================ */
 
 /* Build stamp: app.js refuses to run on files from two different releases. */
-const DATA_BUILD = "milo-v24";
+const DATA_BUILD = "milo-v25";
 
 const AREAS = [
   {

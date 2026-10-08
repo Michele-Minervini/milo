@@ -34,7 +34,7 @@
 var MODEL = (function () {
   "use strict";
 
-  var BUILD = "milo-v24";
+  var BUILD = "milo-v25";
 
   // The shape of the stored data. Any change to what the sanitizers output is a
   // change to what every device keeps: bump this, and see ROADMAP.md.
@@ -520,6 +520,59 @@ var MODEL = (function () {
   function jsonCmp(a, b) { return cmp(JSON.stringify(a), JSON.stringify(b)); }
 
   function sortLog(log) { return log.sort(function (x, y) { return (x.ts - y.ts) || cmp(x.id, y.id); }); }
+
+  // What saving the weigh-in sheet does to the log — decided here, where it
+  // can be tested, and carried out by app.js. d: { editId, dateKey, kg,
+  // waist, note } as typed; tsForDay: the time a NEW weigh-in on that day
+  // gets. One of:
+  //   { error: "gone" }   the weigh-in being edited isn't in the log any more
+  //   { error: "taken" }  it was moved to a day that already has another one
+  //   { error: "kg" }     the weight can't be read, or isn't 20–300 kg
+  //   { error: "waist" }  something was typed for the waist that can't be
+  //                       saved (the sanitizer alone would drop it silently)
+  //   { entry, replaces, changed }
+  //       entry     the weigh-in as it should be stored
+  //       replaces  the entry it takes the place of (same id), or null
+  //       changed   false: it says what the log already says — write
+  //                 nothing (a stamp without a change could undo an edit
+  //                 made meanwhile on another device)
+  // A device never makes a second weigh-in for a day: a new one for a day
+  // that has one changes that one (same id, same time). Two devices can
+  // still each save one for the same day; both stay — nothing is ever
+  // deleted by itself — and TRAINING.bodyWeight reads the later.
+  function weighInWrite(log, d, tsForDay) {
+    if (!d || typeof d !== "object") d = {};
+    var list = Array.isArray(log) ? log : [];
+    var isBody = function (e) { return !!e && typeof e === "object" && e.kind === "body"; };
+    // That day's weigh-in (the latest by time, then id), leaving one id out.
+    var onDay = function (notId) {
+      var found = null;
+      list.forEach(function (e) {
+        if (!isBody(e) || e.id === notId || dateStr(e.ts) !== d.dateKey) return;
+        if (!found || e.ts > found.ts || (e.ts === found.ts && cmp(e.id, found.id) > 0)) found = e;
+      });
+      return found;
+    };
+    var cur = null;
+    if (d.editId) {
+      list.forEach(function (e) { if (isBody(e) && e.id === d.editId) cur = e; });
+      if (!cur) return { error: "gone" };
+      if (dateStr(cur.ts) !== d.dateKey && onDay(cur.id)) return { error: "taken" };
+    } else {
+      cur = onDay(null);
+    }
+    var entry = sanitizeLogEntry({
+      id: cur ? cur.id : genId(),
+      ts: (cur && dateStr(cur.ts) === d.dateKey) ? cur.ts : tsForDay,
+      kind: "body", kg: d.kg, waist: d.waist, note: d.note, mts: cur ? cur.mts : 0
+    });
+    if (!entry) return { error: "kg" };
+    var typed = d.waist !== null && d.waist !== undefined && String(d.waist).trim() !== "";
+    if (typed && entry.waist === null) return { error: "waist" };
+    if (cur && JSON.stringify(entry) === JSON.stringify(cur)) return { entry: cur, replaces: cur, changed: false };
+    entry.mts = stamp(cur ? cur.mts : 0);
+    return { entry: entry, replaces: cur, changed: true };
+  }
   function sortByTsId(list) { return list.sort(function (x, y) { return (x.ts - y.ts) || cmp(x.id, y.id); }); }
 
   // Keep one record per id, the one `wins(candidate, current)` prefers.
@@ -780,6 +833,7 @@ var MODEL = (function () {
     sanitizeMilestone: sanitizeMilestone,
     sanitizeLogEntry: sanitizeLogEntry,
     sortLog: sortLog,
+    weighInWrite: weighInWrite,
     sanitizeExercise: sanitizeExercise,
     merge: merge,
     legacyForMerge: legacyForMerge,

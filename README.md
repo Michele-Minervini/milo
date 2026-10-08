@@ -25,8 +25,11 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   which are several muscles each; change it in Settings) — with where an even
   pace would put you by today, how you compare with this point last week, and a
   balance radar. Skill sessions count too: a set of push-ups is one set for
-  chest and half a set for arms and shoulders. Tap a group for what counted,
-  its last 8 weeks and the skills that train it. The ⓘ explains the counting.
+  chest and half a set for arms and shoulders. Each group's card names the gym
+  exercise you train it with most and its latest top set. Tap a group for what
+  counted, its last 8 weeks, its gym exercises and the skills that train it.
+  The ⓘ explains the counting. At the top, a **Body weight** card (see
+  Weigh-ins below).
 - **Skills.** The six-axis radar, ten rings deep — your current step in every
   ladder — and a card per ladder with what's next. Tap an area (chart or card)
   for its ten steps; tap a dot to jump straight to your current exercise. Every
@@ -34,11 +37,12 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   goals, tips for when it's too hard, and a demo-video link.
 - **History.** Workouts this week, your week streak (weeks in a row with 2 or
   more workouts) and your total; a month calendar with a dot per muscle group
-  trained; and every workout by day (All / Gym / Bodyweight) with the steps you
-  reached. Tap an entry to change or delete it.
+  trained; your **records** of the last 30 days (tap for the whole list, with
+  the skill milestones); and every workout by day (All / Gym / Bodyweight),
+  with a 🏆 on the set that was a record. Tap an entry to change or delete it.
 - **＋ Log.** Today's session moves in one tap, any other skill, a **gym
-  exercise**, or a **quick gym log** (just the working sets per muscle group,
-  when you don't want to log exercises).
+  exercise**, a **quick gym log** (just the working sets per muscle group,
+  when you don't want to log exercises), or a **weigh-in**.
 - **Gym exercises.** About 55 exercises (barbell, dumbbells, machines, cables,
   push-ups, pull-ups, dips, abs work…) plus your own. Log each set as reps × kg and tick it:
   every tick is saved at once, and starts the rest timer. Milo shows what you
@@ -55,6 +59,36 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   suggestion, so a pyramid doesn't have to be typed again.
   Each exercise has its own rep range, weight step and setup note ("seat 4"),
   which you can change.
+- **Records.** When a set beats everything you did before in that exercise,
+  Milo says so as you tick it and marks it with a 🏆. With weights a record is
+  *a heavier weight than ever, in a proper set*: no more than two reps short
+  of the bottom of the exercise's range (at least 6 for an 8–12 exercise), so
+  a heavy single doesn't count, and more reps at the same weight isn't one
+  either. While you log, the sheet says what there is to beat. Without
+  weight it is more reps in one set than ever, or — for a hold — reaching the
+  next 5 seconds. Warm-ups never count, and the first day of an exercise only
+  sets the mark to beat. Records are worked out from the log every time and
+  never stored, so logging a forgotten session for an earlier day, or changing
+  an exercise's rep range, can move them — and every device agrees.
+- **A chart for every exercise.** The ⓘ next to an exercise's name opens its
+  sheet: your numbers, a line chart of the last 20 sessions and your records.
+  For weights the line is the **estimated 1-rep max** of the day's best set
+  (Epley: kg × (1 + reps ÷ 30), reps counted up to 20) — it rises with more
+  weight *or* more reps, and often dips on the day you go up in weight. For
+  ranges above 15 reps it is the top weight instead; for added weight
+  (pull-ups, dips) the top added weight; for an assisted machine the least
+  help; for bodyweight exercises the most reps; for holds the longest one.
+- **Weigh-ins.** Body weight in kg, and your waist in cm if you like, about
+  once a week (＋ Log → Weigh-in, or the Body weight card). Body shows the
+  latest weight and the change since the one before; its sheet adds the change
+  over about a month, a 7-day average when you weigh in three or more days a
+  week, your waist, a chart of up to 12 weeks, and your 12 latest weigh-ins
+  to edit (older ones are in History, under All). A
+  week after the last one, Today offers the next (for two weeks, then it stops
+  asking). Changes are plain signed numbers, never green or red: neither
+  direction is good or bad by itself. One weigh-in per day on a device:
+  saving again for a day changes that day's (two devices that each save one
+  before syncing keep both, and the later one is the day's value).
 - **Logging a skill session.** Enter your sets and reps (or hold time) and
   save. The app checks the result against the goals and marks the standard you
   met automatically; when you hit the Progression goal it offers to move you up
@@ -70,7 +104,7 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   fires while Milo is open on screen — nothing runs once the phone locks or
   another app is in front — so with the option on Milo keeps the screen on
   during the rest.
-  Each exercise also shows a top-set sparkline over time.
+  Each skill step also shows a top-set sparkline over time.
 - **It tells you what to do.** Every movement comes with a prescription — the
   exercise, the sets and reps, and which standard you're chasing — worked out
   from where you are right now. Move up a step and the next screen already asks

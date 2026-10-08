@@ -6,9 +6,10 @@
    shapes migrate automatically on load. The `mts` / `pm` stamps and
    `deleted` tombstones exist only for sync: they let two devices merge
    without losing or resurrecting anything. Nothing in the UI reads them.
-   Log entries come in kinds: skill-ladder sessions (no `kind`) and quick
-   gym logs ("quick") are logged here; gym-exercise and weigh-in entries
-   are only displayed so far. Volume per muscle group is in training.js.
+   Log entries come in kinds: skill-ladder sessions (no `kind`), quick gym
+   logs ("quick"), gym exercises ("gym") and weigh-ins ("body"), each with
+   its own sheet here. Volume per muscle group, records, charts and body
+   weight are worked out in training.js; nothing derived is ever stored.
    std: 0 = working on it, 1 = beginner met, 2 = intermediate met,
         3 = progression (or elite) met.
    Radar value per area = (step - 1) + std / 3  →  0..10 rings filled.
@@ -23,7 +24,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v24";
+  var BUILD = "milo-v25";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -267,9 +268,17 @@
     try { var p = JSON.parse(raw); return Number(p && p.v) || 0; } catch (e) { return 0; }
   }
 
+  // Records, charts and each group's exercises all read one index of the gym
+  // log (TRAINING.gymIndex), built at most once between two changes: every
+  // change goes through saveState() or refresh(), and both drop it. Nothing
+  // else may call TRAINING.gymIndex — or once per row it would be slow.
+  var gymIdx = null;
+  function gym() { return gymIdx || (gymIdx = TRAINING.gymIndex(state.log)); }
+
   // Returns true when the write actually landed. (User-initiated saves always
   // proceed; only the automatic boot-time write is suppressed after a bad load.)
   function saveState() {
+    gymIdx = null;
     if (readOnly) { showBanner("newer"); return false; }
     try {
       var stored = localStorage.getItem(STORE_KEY);
@@ -337,13 +346,14 @@
   }
 
   var toastTimer = null;
-  function toast(msg) {
+  // ms: how long it stays (a record gets longer than "saved").
+  function toast(msg, ms) {
     var t = $("#toast");
     t.classList.remove("act");
     t.textContent = msg;
     t.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.classList.remove("show"); }, 2600);
+    toastTimer = setTimeout(function () { t.classList.remove("show"); }, ms || 2600);
   }
 
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1123,6 +1133,22 @@
     var d = dayDelta(ts, nowMs());
     return d <= 0 ? "today" : (d === 1 ? "yesterday" : d + " days ago");
   }
+  // A date that may be far back: "Mon 3 Aug", with the year once it isn't this one.
+  function dayYear(ts) {
+    var y = new Date(ts).getFullYear();
+    return shortDay(ts) + (y === new Date(nowMs()).getFullYear() ? "" : " " + y);
+  }
+  // "+0.4 kg", "−0.4 kg" (a real minus sign). No arrows and no colours for a
+  // body measure: neither direction is good or bad by itself.
+  function signed(x, unit) { return (x < 0 ? "\u2212" : "+") + fmtKg(Math.abs(x)) + " " + unit; }
+  // "−0.4 kg since Mon 28 Sep", "Same as Mon 28 Sep" — never "−0 kg".
+  function changeSince(change, ts, unit) {
+    return change === 0 ? "Same as " + dayYear(ts) : signed(change, unit) + " since " + dayYear(ts);
+  }
+  // A record is one mark everywhere: the trophy, with words for a screen reader.
+  var TROPHY = "&#127942;", SCALES = "&#9878;&#65039;";
+  // (Not ico(): its right margin would open a gap before a comma after it.)
+  function recMark() { return '<span aria-hidden="true">' + TROPHY + '</span><span class="visually-hidden">, a record</span>'; }
   function fmtSets(n) { return TRAINING.fmtSets(n); }
   function setsWord(n) { return fmtSets(n) + (n === 1 ? " set" : " sets"); }
   // "6 chest sets", "3 shoulder sets".
@@ -1190,11 +1216,15 @@
   }
 
   /* Per-device flags (localStorage, never synced):
-       milo.whatsnew  "show" until "What's new" is dismissed ("done"). Set to
-                      "show" only if this device had data before its first
-                      launch of this version; a new device never sees it.
+       milo.whatsnew  which "What's new" this device has seen: NEWS once the
+                      current one is dismissed. Anything else (nothing yet,
+                      or an older release's "show" / "done") shows the line
+                      once. A device with nothing on it at its first launch
+                      is given NEWS straight away and never sees it.
        milo.come      "done" once "Coming from another device?" is answered. */
-  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come";
+  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "p5";
+  // Dismissed in this page view: holds even where the flag can't be stored.
+  var newsSeen = false;
   function flag(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
   function setFlag(key, v) { try { localStorage.setItem(key, v); } catch (e) { /* best effort */ } }
 
@@ -1212,6 +1242,7 @@
     // chips say what that day now is ("Yesterday"), so Save can't surprise.
     var top = uiStack[uiStack.length - 1];
     if (top && top.t === "quick" && quickDraft) { readQuickInputs(); renderSheet(); }
+    if (top && top.t === "weigh" && weighDraft) { readWeighInputs(); renderSheet(); }
   }
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) refreshIfDayChanged();
@@ -1228,7 +1259,8 @@
     if (fresh && flag(COME_KEY) !== "done") parts.push(comeCardHTML());
     if (!fresh) parts.push(todayNudgeHTML(ws, now));
     parts.push(routineOn() ? sessionCardHTML() : setupCardHTML());
-    if (flag(WHATSNEW_KEY) === "show" && !fresh) parts.push(whatsNewLineHTML());
+    if (!fresh) parts.push(weighLineHTML(now));
+    if (!newsSeen && flag(WHATSNEW_KEY) !== NEWS && !fresh) parts.push(whatsNewLineHTML());
     parts.push(state.log.some(isTraining) ? weekCardHTML(ws, now) : weekEmptyHTML());
     host.innerHTML = parts.join("");
     wireToday(host);
@@ -1314,8 +1346,21 @@
   function whatsNewLineHTML() {
     return '<div class="today-card wnline">' +
       '<button class="wn-open" id="whatsNewBtn" type="button">' + ico("&#10024;") +
-      '<span class="wn-text"><b>Milo has tabs now.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<span class="wn-text"><b>Records, charts and weigh-ins.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
       '<button class="nc-x" id="whatsNewX" type="button" aria-label="Hide what&#8217;s new">&#10005;</button></div>';
+  }
+
+  // Once a week has gone by since the last weigh-in, one line on Today offers
+  // the next. It asks for two weeks, then goes quiet (Body still says how
+  // long it has been), and never before the first weigh-in: nothing here can
+  // be switched off, so it must stop by itself.
+  var WEIGH_DUE = 7, WEIGH_QUIET = 21;
+  function weighLineHTML(now) {
+    var bw = TRAINING.bodyWeight(state.log, now);
+    if (!bw.last || bw.daysSince < WEIGH_DUE || bw.daysSince >= WEIGH_QUIET) return "";
+    return '<div class="today-card wnline"><button class="wn-open" id="weighLine" type="button">' + ico(SCALES) +
+      '<span class="wn-text"><b>Weekly weigh-in</b> &middot; last one ' + bw.daysSince + " days ago</span>" +
+      '<span class="chev" aria-hidden="true">&#8250;</span></button></div>';
   }
 
   function comeCardHTML() {
@@ -1392,7 +1437,8 @@
     on("#weekBtn", openWeek);
     on("#toBodyBtn", function () { showTab("body", true); });
     on("#whatsNewBtn", function () { pushView({ t: "whatsnew" }); });
-    on("#whatsNewX", function () { setFlag(WHATSNEW_KEY, "done"); renderToday(); restoreFocus(null, ""); });
+    on("#whatsNewX", function () { newsSeen = true; setFlag(WHATSNEW_KEY, NEWS); renderToday(); restoreFocus(null, ""); });
+    on("#weighLine", function () { openWeigh(); });
     on("#comeSyncBtn", function () { openSettingsAt("#pairCode", true); });
     on("#comeRestoreBtn", function () { openSettingsAt("#restoreBtn", true); });
     on("#comeNoBtn", function () { setFlag(COME_KEY, "done"); renderToday(); });
@@ -1448,8 +1494,41 @@
     return '<p class="verdict">' + part("On target", of("target")) + part("On pace", of("pace")) + part("Behind", behind) + "</p>";
   }
 
-  function bodyRowHTML(g, ws, before, now) {
-    var r = ws.by[g], last = TRAINING.lastTrained(state.log, g, now), feed = feedLine(g);
+  // A group's main gym exercise, as its card names it: "Back squat: 5 × 43.25
+  // kg" (the top set of its latest session — the record's own set, with a
+  // trophy, when that session set one), and its own day when that isn't the
+  // day the group was last trained ("…, 9 days ago").
+  function liftLine(l, lastTs) {
+    var ex = TRAINING.exercise(l.exId);
+    if (!ex) return "";
+    return esc(ex.name) + ': <span class="nw">' + esc(oneSet(ex, l.kg, l.reps)) + (l.record ? " " + recMark() : "") + "</span>" +
+      (lastTs && dateStr(lastTs) === l.day ? "" : ", " + agoPhrase(l.ts));
+  }
+
+  // The Body weight card: slim, first on the tab, in the group cards' own
+  // look. The whole picture (changes, chart, every weigh-in) is its sheet.
+  function bwCardHTML(bw) {
+    var L = bw.last, right, meta;
+    if (!L) {
+      right = '<span class="gr-num bw-add">&#65291; Weigh in</span>';
+      meta = "No weigh-ins yet. Once a week is enough.";
+    } else {
+      right = '<span class="gr-num"><b>' + esc(fmtKg(L.kg)) + "</b> kg</span>";
+      meta = bw.daysSince >= WEIGH_DUE ? "Last weigh-in " + bw.daysSince + " days ago"
+        : esc(dayLabel(L.ts)) + " &middot; " + (bw.prev ? esc(changeSince(bw.change, bw.prev.ts, "kg").replace(/^Same/, "same")) : "your first weigh-in");
+    }
+    return '<button class="card grow bwcard" id="bwCard" type="button" style="--area:var(--axis)">' +
+      '<span class="gr-top"><span class="gr-name">' + ico(SCALES) + "Body weight</span>" + right +
+      '<span class="chev" aria-hidden="true">&#8250;</span></span>' +
+      '<span class="gr-meta">' + meta + "</span></button>";
+  }
+
+  // last: when each group was last trained; lifts: each group's gym exercises
+  // (both worked out once per render, not once per card).
+  function bodyRowHTML(g, ws, before, last, lifts) {
+    var r = ws.by[g], lift = lifts[g][0];
+    last = last[g];
+    var feed = (lift && liftLine(lift, last)) || feedLine(g);
     return '<button class="card grow st-' + r.standing + " z-" + r.zone + '" type="button" data-group="' + g + '" style="--area:' + groupColorVar(g) + '">' +
       '<span class="gr-top"><span class="gr-name"><span class="swatch"></span>' + esc(groupName(g)) + "</span>" +
       '<span class="gr-num"><b>' + esc(fmtSets(r.sets)) + "</b> / " + r.lo + "&#8211;" + r.hi + '<span class="visually-hidden"> hard sets</span></span>' +
@@ -1483,13 +1562,15 @@
       '<button class="infobtn" id="bodyInfoBtn" type="button" aria-label="How the week is counted">&#9432;</button></h2>' +
       '<span class="today-sub">Hard sets per muscle group &middot; ' + DOW_LONG[new Date(now).getDay()] + ", day " + dayN + " of 7</span></div>";
     var balance = $("#bodyBalance");
+    var bw = TRAINING.bodyWeight(state.log, now);
     if (!state.log.some(isTraining)) {
-      top.innerHTML = head + bodyEmptyHTML();
+      top.innerHTML = bwCardHTML(bw) + head + bodyEmptyHTML();
       if (balance) balance.hidden = true;
     } else {
       var before = TRAINING.lastWeekToDate(state.log, now);
-      top.innerHTML = head + verdictHTML(ws) +
-        '<div class="grows">' + MODEL.GROUPS.map(function (g) { return bodyRowHTML(g, ws, before, now); }).join("") + "</div>" + TB_LEGEND;
+      var last = TRAINING.lastTrainedAll(state.log, now), lifts = TRAINING.lifts(gym(), now);
+      top.innerHTML = bwCardHTML(bw) + head + verdictHTML(ws) +
+        '<div class="grows">' + MODEL.GROUPS.map(function (g) { return bodyRowHTML(g, ws, before, last, lifts); }).join("") + "</div>" + TB_LEGEND;
       if (balance) balance.hidden = false;
       paintBodyRadar(ws, before, now);
     }
@@ -1497,6 +1578,8 @@
     if (info) info.addEventListener("click", openVolInfo);
     var lg = $("#bodyLogBtn", top);
     if (lg) lg.addEventListener("click", openLogPick);
+    var bc = $("#bwCard", top);
+    if (bc) bc.addEventListener("click", function () { if (bw.last) pushView({ t: "weight" }); else openWeigh(); });
     top.querySelectorAll("[data-group]").forEach(function (b) {
       b.addEventListener("click", function () { openGroup(b.getAttribute("data-group")); });
     });
@@ -1636,6 +1719,14 @@
         '<span class="libsub">' + esc(step.name) + ": " + what + "</span></span>" +
         '<span class="chev" aria-hidden="true">&#8250;</span></button>';
     }).join("");
+    var liftRows = TRAINING.lifts(gym(), now)[g].map(function (l) {
+      var ex = TRAINING.exercise(l.exId);
+      return '<button class="librow exrow" type="button" data-lift="' + esc(l.exId) + '" style="--area:' + exColor(ex) + '">' +
+        '<span class="libinfo"><span class="libname">' + esc(ex.name) + "</span>" +
+        '<span class="libsub">Latest ' + esc(dayLabel(l.ts)) + ": " + esc(oneSet(ex, l.kg, l.reps)) +
+        (l.record ? " &middot; " + ico(TROPHY) + "record" : "") + " &middot; " + l.days + (l.days === 1 ? " session" : " sessions") + "</span></span>" +
+        '<span class="chev" aria-hidden="true">&#8250;</span></button>';
+    }).join("");
     var goal = r.sets ? zoneText(r) + " &middot; " + deltaText(r.sets, before[g] || 0).replace(/^Same/, "same")
       : "None yet this week &middot; the target is " + r.lo + "&#8211;" + r.hi;
     return sheetHead({
@@ -1649,6 +1740,7 @@
       '<span class="rxgoal st-' + r.standing + '">' + goal + "</span></div>" +
       "<h4>What counted this week</h4>" + table +
       "<h4>Last 8 weeks</h4>" + chart +
+      (liftRows ? "<h4>Gym exercises, last 8 weeks</h4>" + '<div class="librows">' + liftRows + "</div>" : "") +
       "<h4>Skills that train it</h4>" + '<div class="librows">' + feeds + "</div>" +
       "</div>" +
       '<div class="sheet-foot"><button class="btn primary wide" id="groupLogBtn" type="button">&#65291; Log ' + SET_WORD[g] + " sets</button></div>";
@@ -1980,6 +2072,407 @@
     toast(savedOk ? msg : notSavedMsg());
   }
 
+  /* ---------- Body weight: the weigh-in form, and the sheet behind the card ----------
+
+     A weigh-in is one log entry { kind: "body", kg, waist } — a kind the data
+     has had since v5, so older copies of the app already keep, show and sync
+     them. MODEL.weighInWrite decides what a save does to the log;
+     TRAINING.bodyWeight reads one value per day for every number shown.
+     Nothing else is stored: no goal, no setting. */
+
+  // { editId, date, pick, kg, waist, note, shown } plus what the form opened
+  // with (open: { kg, waist, note }), whether it opened on today's weigh-in
+  // by itself (auto), and what it showed it would replace (seen).
+  var weighDraft = null;
+  // A typed number: digits, with up to two decimals after a point or a comma.
+  // (The parser alone would also take "1e2" and "0x50".)
+  var TYPED_NUM_RE = /^\d{1,3}([.,]\d{1,2})?$/;
+  // A weight this far (as a share) from the last one is asked about before
+  // saving: 27.4 for 72.4 would wreck the chart's scale.
+  var WEIGH_TYPO = 0.1;
+
+  function isWeighIn(e) { return !!e && e.kind === "body"; }
+  // That day's weigh-in (the latest), leaving one id out; or null.
+  function weighInOn(dateKey, notId) {
+    var found = null;
+    state.log.forEach(function (e) { if (isWeighIn(e) && e.id !== notId && dateStr(e.ts) === dateKey) found = e; });
+    return found;
+  }
+  // The latest weigh-in on a day before that one.
+  function weighInBefore(dateKey, notId) {
+    var found = null;
+    state.log.forEach(function (e) { if (isWeighIn(e) && e.id !== notId && dateStr(e.ts) < dateKey) found = e; });
+    return found;
+  }
+  function weighText(e) { return fmtKg(e.kg) + " kg" + (e.waist ? " · waist " + fmtKg(e.waist) + " cm" : ""); }
+  // "3 Aug", with the year once it isn't this one.
+  function dayMon(ts) {
+    var d = new Date(ts);
+    return d.getDate() + " " + MON_SHORT[d.getMonth()] + (d.getFullYear() === new Date(nowMs()).getFullYear() ? "" : " " + d.getFullYear());
+  }
+
+  // id: a weigh-in to edit. Without one: today's weigh-in if there is one —
+  // so its number, waist and note are on screen and nothing is replaced
+  // unseen — else a new one, starting from the last weight.
+  function openWeigh(id) {
+    var k = quickDays(), e = null;
+    if (id) {
+      e = entryById(id);
+      if (!isWeighIn(e)) return;
+    } else {
+      e = weighInOn(k.today, null);
+    }
+    var date = e ? dateStr(e.ts) : k.today;
+    var last = TRAINING.bodyWeight(state.log, nowMs()).last;
+    weighDraft = {
+      editId: e ? e.id : null,
+      date: date,
+      pick: date !== k.today && date !== k.yesterday,
+      kg: e ? fmtKg(e.kg) : (last ? fmtKg(last.kg) : ""),
+      waist: e && e.waist ? fmtKg(e.waist) : "",
+      note: e ? e.note || "" : "",
+      // Opened on today's weigh-in without being asked for it: choosing
+      // another day then starts a NEW weigh-in for that day (see the day
+      // chips) rather than moving today's there.
+      auto: !id && !!e
+    };
+    weighDraft.open = { kg: weighDraft.kg, waist: weighDraft.waist, note: weighDraft.note };
+    pushView({ t: "weigh", x: e ? e.id : undefined });
+  }
+
+  // What a save from this form would take the place of, as "id:stamp" ("" for
+  // nothing). Noted whenever the form is painted, and checked again on Save:
+  // a sync or another tab can change the log under an open form.
+  function weighTarget() {
+    var d = weighDraft, t = d.editId ? entryById(d.editId) : weighInOn(d.date, null);
+    return isWeighIn(t) ? t.id + ":" + t.mts : "";
+  }
+
+  // Said under the day chips when the chosen day already has another weigh-in.
+  function weighClashText() {
+    var d = weighDraft, other = weighInOn(d.date, d.editId);
+    if (!other) return "";
+    var when = d.date === quickDays().today ? "today" : "on " + dayYear(other.ts);
+    return d.editId
+      ? "There is already a weigh-in " + when + ": " + fmtKg(other.kg) + " kg. Open that one to change it, or delete it first."
+      : "You already weighed in " + when + ": " + fmtKg(other.kg) + " kg. Saving replaces it.";
+  }
+
+  function weighPaneHTML() {
+    var d = weighDraft, k = quickDays(), editing = !!d.editId;
+    var mode = quickMode(d);
+    d.shown = mode;
+    var chip = function (m, label) {
+      return '<button type="button" class="chip wday' + (mode === m ? " sel" : "") + '" data-day="' + m +
+        '" aria-pressed="' + (mode === m ? "true" : "false") + '">' + label + "</button>";
+    };
+    var prev = weighInBefore(d.date, d.editId);
+    var waist = TRAINING.bodyWeight(state.log, nowMs()).waist.last;
+    var clash = weighClashText();
+    d.seen = weighTarget();
+    return sheetHead({ title: editing ? "Edit weigh-in" : "Weigh-in", sub: esc(prettyDate(quickTs(d.date))) }) +
+      '<div class="sheet-body quickpane weighpane" style="--area:var(--accent)">' +
+      "<h4>Day</h4>" +
+      '<div class="chips" role="group" aria-label="Day">' + chip("today", "Today") + chip("yesterday", "Yesterday") + chip("pick", "Pick a day") + "</div>" +
+      (mode === "pick"
+        ? '<label class="visually-hidden" for="weighDate">Day you weighed in</label>' +
+          '<input type="date" id="weighDate" class="qdate" value="' + esc(d.date) + '" min="2000-01-01" max="' + k.today + '">'
+        : "") +
+      '<p class="hint wclash" id="weighClash"' + (clash ? "" : " hidden") + ">" + esc(clash) + "</p>" +
+      "<h4>Body weight</h4>" +
+      '<div class="volrow"><span class="vlab" id="bwKgL">Weight (kg)</span>' +
+      '<span class="stepper"><button type="button" class="stepbtn" data-bw="-1" aria-label="0.1 kg less">&#8722;</button>' +
+      '<input class="stepval bwkg" id="bwKg" type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done" value="' + esc(d.kg) + '" placeholder="kg" aria-labelledby="bwKgL">' +
+      '<button type="button" class="stepbtn" data-bw="1" aria-label="0.1 kg more">&#43;</button></span></div>' +
+      '<p class="glast" id="weighLast"' + (prev ? "" : " hidden") + '><b>Last time</b> &middot; <span id="weighLastText">' +
+      (prev ? esc(dayYear(prev.ts) + ": " + weighText(prev)) : "") + "</span></p>" +
+      '<div class="volrow"><label class="vlab" for="bwWaist">Waist in cm (optional)</label>' +
+      '<input class="stepval bwwaist" id="bwWaist" type="text" inputmode="decimal" autocomplete="off" enterkeyhint="done" value="' + esc(d.waist) + '" placeholder="cm"></div>' +
+      '<p class="hint">Around your middle at the navel, tape level and snug, after breathing out. Leave it empty to skip' +
+      (waist ? "; last measured " + esc(fmtKg(waist.cm)) + " cm, " + esc(dayYear(waist.ts)) : "") + ".</p>" +
+      '<p class="hint">To compare like with like: the same day each week, in the morning, before you eat or drink.</p>' +
+      "<h4>Note (optional)</h4>" +
+      '<textarea id="bwNote" class="lognote" rows="2" maxlength="280" aria-label="Note (optional)" placeholder="Evening, after a big dinner, a different scale">' + esc(d.note || "") + "</textarea>" +
+      (editing ? '<button type="button" class="btn danger wide qdel" id="deleteWeigh">Delete this weigh-in</button>' : "") +
+      "</div>" +
+      '<div class="sheet-foot"><button type="button" class="btn primary wide" id="saveWeigh"' + (String(d.kg).trim() === "" ? " disabled" : "") + ">" +
+      (editing ? "Save changes" : "Save weigh-in") + "</button></div>";
+  }
+
+  function readWeighInputs() {
+    var sheet = $("#sheet"), d = weighDraft;
+    if (!d) return;
+    var kg = $("#bwKg", sheet), waist = $("#bwWaist", sheet), note = $("#bwNote", sheet);
+    if (kg) d.kg = kg.value;
+    if (waist) d.waist = waist.value;
+    if (note) d.note = note.value;
+  }
+
+  function wireWeigh(sheet) {
+    var d = weighDraft;
+    if (!d) return;
+    var kgIn = $("#bwKg", sheet), saveBtn = $("#saveWeigh", sheet);
+    var minus = $('[data-bw="-1"]', sheet), plus = $('[data-bw="1"]', sheet);
+    // The weight in the box to one decimal, or NaN while it isn't a number.
+    function typedKg() {
+      var v = kgIn.value.trim();
+      return TYPED_NUM_RE.test(v) ? Math.round(MODEL.parseKg(v) * 10) / 10 : NaN;
+    }
+    function paint() {
+      var n = typedKg();
+      saveBtn.disabled = kgIn.value.trim() === "";
+      // aria-disabled, not disabled: a disabled button would drop keyboard focus.
+      minus.setAttribute("aria-disabled", n > 20 ? "false" : "true");
+      plus.setAttribute("aria-disabled", n < 300 ? "false" : "true");
+    }
+    // What depends on the chosen day, redrawn in place when the date box
+    // changes (a full redraw would close the iPhone's date picker): the
+    // notice that the day already has a weigh-in — also read out, since it
+    // says Save will replace something — and the "Last time" before that day.
+    function paintDay() {
+      var el = $("#weighClash", sheet), text = weighClashText();
+      el.textContent = text;
+      el.hidden = !text;
+      if (text) announce(text);
+      var p = weighInBefore(d.date, d.editId);
+      $("#weighLastText", sheet).textContent = p ? dayYear(p.ts) + ": " + weighText(p) : "";
+      $("#weighLast", sheet).hidden = !p;
+      d.seen = weighTarget();
+    }
+
+    sheet.querySelectorAll(".wday").forEach(function (b) {
+      b.addEventListener("click", function () {
+        readWeighInputs();
+        var k = quickDays(), m = b.getAttribute("data-day");
+        if (m === "today") { d.date = k.today; d.pick = false; }
+        else if (m === "yesterday") { d.date = k.yesterday; d.pick = false; }
+        else {
+          d.pick = true;
+          if (d.date >= k.yesterday) d.date = k.before;
+        }
+        // The form opened on today's weigh-in only because today has one.
+        // Another day means another weigh-in: a new one, not today's moved
+        // there — with today's waist and note left behind unless retyped.
+        if (d.auto && d.date !== k.today) {
+          d.auto = false;
+          d.editId = null;
+          if (d.waist === d.open.waist) d.waist = "";
+          if (d.note === d.open.note) d.note = "";
+          d.open = { kg: d.kg, waist: d.waist, note: d.note };
+        }
+        renderSheet();
+        focusIn($("#sheet"), '.wday[data-day="' + m + '"]');
+        var clash = weighClashText();
+        if (clash) announce(clash);
+      });
+    });
+    // Updated in place: re-rendering would close the iPhone's date picker.
+    var di = $("#weighDate", sheet);
+    if (di) di.addEventListener("change", function () {
+      var v = di.value, today = quickDays().today;
+      if (!DATE_KEY_RE.test(v) || v < "2000-01-01") return;   // half-typed: checked again on save
+      if (v > today) { toast("That day hasn't happened yet"); di.value = d.date; return; }
+      d.date = v;
+      var sub = $(".sheet-head .sub", sheet);
+      if (sub) sub.textContent = prettyDate(quickTs(v));
+      paintDay();
+    });
+
+    [minus, plus].forEach(function (b) {
+      b.addEventListener("click", function () {
+        var n = typedKg();
+        if (!isFinite(n) || b.getAttribute("aria-disabled") === "true") return;
+        // To one decimal each time: 72.3 + 0.1 is 72.39999999999999 otherwise.
+        var next = Math.min(300, Math.max(20, Math.round((n + Number(b.getAttribute("data-bw")) * 0.1) * 10) / 10));
+        kgIn.value = fmtKg(next);
+        d.kg = kgIn.value;
+        paint();
+        announce(kgIn.value + " kg");
+      });
+    });
+    kgIn.addEventListener("input", function () { d.kg = kgIn.value; paint(); });
+    // Typing replaces the number that is there (last time's weight).
+    kgIn.addEventListener("focus", function () { try { kgIn.select(); } catch (e) { /* ignore */ } });
+    var waistIn = $("#bwWaist", sheet), note = $("#bwNote", sheet);
+    if (waistIn) waistIn.addEventListener("input", function () { d.waist = waistIn.value; });
+    if (note) note.addEventListener("input", function () { d.note = note.value; });
+    saveBtn.addEventListener("click", saveWeigh);
+
+    var del = $("#deleteWeigh", sheet);
+    if (del) del.addEventListener("click", function () {
+      if (!confirm("Delete this weigh-in?")) return;
+      var id = d.editId;
+      weighDraft = null;
+      deleteLogEntry(id);
+      refresh();
+      leaveForm();
+      toast(storageOk && !readOnly ? "Weigh-in deleted" : notSavedMsg());
+    });
+    paint();
+  }
+
+  function saveWeigh() {
+    readWeighInputs();
+    var d = weighDraft, sheet = $("#sheet");
+    var stop = function (msg, sel) { toast(msg); focusIn(sheet, sel); };
+    // Midnight passed with the sheet open: "Today" on screen is now yesterday.
+    if (d.shown && d.shown !== quickMode(d)) {
+      renderSheet();
+      toast("It's a new day — check the day, then save again");
+      return;
+    }
+    var di = $("#weighDate", sheet);
+    var date = (di && d.pick) ? di.value : d.date;
+    if (!DATE_KEY_RE.test(date) || date < "2000-01-01" || date > quickDays().today) { toast("Pick today or an earlier day"); return; }
+    d.date = date;
+    var kg = String(d.kg).trim(), waist = String(d.waist).trim();
+    if (kg === "") { stop("Enter your weight first", "#bwKg"); return; }
+    if (!TYPED_NUM_RE.test(kg)) { stop("That weight isn't a number", "#bwKg"); return; }
+    if (waist !== "" && !TYPED_NUM_RE.test(waist)) { stop("That waist isn't a number", "#bwWaist"); return; }
+    var r = MODEL.weighInWrite(state.log, { editId: d.editId, dateKey: d.date, kg: kg, waist: waist, note: String(d.note || "").slice(0, 280) }, quickTs(d.date));
+    if (r.error === "gone") {
+      weighDraft = null; refresh(); leaveForm();
+      toast("Not saved — that weigh-in was deleted meanwhile");
+      return;
+    }
+    if (r.error === "taken") { toast("That day already has a weigh-in. Open that one, or delete it first."); return; }
+    if (r.error === "kg") { stop("Use a weight between 20 and 300 kg", "#bwKg"); return; }
+    if (r.error === "waist") { stop("Waist: 30 to 250 cm, or leave it empty", "#bwWaist"); return; }
+    if (!r.changed) { weighDraft = null; leaveForm(); return; }
+    // The weigh-in this would replace changed, or appeared, while the form
+    // was open (a sync, another tab): show it before anything is overwritten.
+    // If nothing was typed here, the form simply takes the newer values.
+    var target = r.replaces ? r.replaces.id + ":" + r.replaces.mts : "";
+    if (target !== d.seen) {
+      if (d.editId && r.replaces && d.kg === d.open.kg && d.waist === d.open.waist && d.note === d.open.note) {
+        d.kg = fmtKg(r.replaces.kg);
+        d.waist = r.replaces.waist ? fmtKg(r.replaces.waist) : "";
+        d.note = r.replaces.note || "";
+        d.open = { kg: d.kg, waist: d.waist, note: d.note };
+      }
+      renderSheet();
+      toast("This weigh-in changed on another device — check it, then save again", 4000);
+      return;
+    }
+    // A slip of the finger, before it is saved: a weight that is new or
+    // changed, compared with the latest other weigh-in.
+    var ref = null;
+    state.log.forEach(function (e) { if (isWeighIn(e) && e.id !== r.entry.id) ref = e; });
+    if (ref && (!r.replaces || r.replaces.kg !== r.entry.kg) && Math.abs(r.entry.kg - ref.kg) / ref.kg > WEIGH_TYPO &&
+        !confirm("Your latest other weigh-in is " + fmtKg(ref.kg) + " kg. Save " + fmtKg(r.entry.kg) + " kg?")) { focusIn(sheet, "#bwKg"); return; }
+    if (r.replaces) state.log[state.log.indexOf(r.replaces)] = r.entry;
+    else state.log.push(r.entry);
+    // A past day (or a changed date) lands mid-log: keep the stored order.
+    MODEL.sortLog(state.log);
+    var ok = saveState();
+    weighDraft = null;
+    refresh();
+    leaveForm();
+    var msg = "Weigh-in updated ✓";
+    if (!r.replaces) {
+      // The change, when this is now the latest: nothing on Today shows it.
+      var bw = TRAINING.bodyWeight(state.log, nowMs());
+      msg = !bw.last || bw.last.id !== r.entry.id ? "Weigh-in saved ✓"
+        : (!bw.prev ? "First weigh-in saved ✓"
+          : "Weigh-in saved ✓ " + (bw.change === 0 ? "same as last time" : signed(bw.change, "kg") + " since last time"));
+    }
+    toast(ok ? msg : notSavedMsg());
+  }
+
+  /* ---- The sheet behind the Body weight card ---- */
+
+  function weightPaneHTML() {
+    var now = nowMs(), bw = TRAINING.bodyWeight(state.log, now), L = bw.last, today = quickDays().today;
+    var all = state.log.filter(isWeighIn);
+    var top = "";
+    if (L) {
+      var rows = [];
+      // With three or more weigh-ins a week the month is 7-day average
+      // against 7-day average, and says so: the number then goes with the
+      // average row below it, not with the big latest weight.
+      if (bw.month) rows.push([bw.month.avg ? "In about a month, by the 7-day average" : "In about a month", esc(changeSince(bw.month.change, bw.month.ts, "kg"))]);
+      else if (bw.sinceFirst) rows.push(["Since your first weigh-in", esc((bw.sinceFirst.change === 0 ? "No change" : signed(bw.sinceFirst.change, "kg")) + " · " + dayYear(bw.sinceFirst.ts))]);
+      if (bw.avg7) rows.push(["7-day average", esc(fmtKg(bw.avg7.kg) + " kg · " + bw.avg7.n + " weigh-ins")]);
+      var w = bw.waist;
+      if (w.last) {
+        // The measure's own day whenever it isn't the latest weigh-in's: it
+        // can be weeks older than the weight above it.
+        var own = w.last.ts !== L.ts ? " on " + dayYear(w.last.ts) : "";
+        var versus = !w.ref ? "" : (Math.abs(w.change) < 1 ? "about the same as on " + dayYear(w.ref.ts) : signed(w.change, "cm") + " since " + dayYear(w.ref.ts));
+        rows.push(["Waist", esc(fmtKg(w.last.cm) + " cm" + own + (versus ? " · " + versus : (own ? "" : " · " + dayYear(w.last.ts))))]);
+      }
+      top = '<div class="rx gs-sum"><span class="rxlabel">Latest &middot; ' + esc(dayLabel(L.ts)) +
+        (bw.daysSince >= WEIGH_DUE ? " &middot; " + bw.daysSince + " days ago" : "") + "</span>" +
+        '<span class="rxbig">' + esc(fmtKg(L.kg)) + " kg</span>" +
+        '<span class="rxgoal">' + (bw.prev ? esc(changeSince(bw.change, bw.prev.ts, "kg")) : "Your first weigh-in") + "</span></div>" +
+        (rows.length ? '<div class="stdtable">' + rows.map(function (r) {
+          return '<div class="stdrow"><span class="lb">' + r[0] + "</span><strong>" + r[1] + "</strong></div>";
+        }).join("") + "</div>" : "");
+    }
+
+    var pts = bw.chart.points, chart;
+    var weeks = Math.round(bw.chart.days / 7);
+    if (pts.length >= 2) {
+      var split = bw.chart.split, vals = [], span = bw.chart.days - 1, anyGap = false;
+      pts.forEach(function (p) { vals.push(p.kg); if (split) vals.push(p.avg); });
+      var points = pts.map(function (p, i) {
+        var gap = i > 0 && dayDelta(pts[i - 1].ts, p.ts) > 14;
+        if (gap) anyGap = true;
+        return {
+          x: dayDelta(bw.chart.from, p.ts) / span, v: p.kg, line: split ? p.avg : undefined, gap: gap,
+          tip: shortDay(p.ts) + ": " + fmtKg(p.kg) + " kg" + (split ? " · 7-day average " + fmtKg(p.avg) + " kg" : "")
+        };
+      });
+      var a = pts[0], b = pts[pts.length - 1], diff = Math.round((b.kg - a.kg) * 10) / 10;
+      var when = function (ts) { return dateStr(ts) === today ? "today" : "on " + dayMon(ts); };
+      var words = diff === 0 ? fmtKg(a.kg) + " kg " + when(a.ts) + " and " + when(b.ts) + ": no change."
+        : "From " + fmtKg(a.kg) + " kg " + when(a.ts) + " to " + fmtKg(b.kg) + " kg " + when(b.ts) + ": " + (diff > 0 ? "up " : "down ") + fmtKg(Math.abs(diff)) + " kg.";
+      chart = '<div class="lc" style="--area:var(--accent)">' + lineChartSVG(points, {
+        scale: TRAINING.chartScale(Math.min.apply(null, vals), Math.max.apply(null, vals), 4),
+        left: dayMon(bw.chart.from), right: "today", h: 124,
+        aria: "Body weight over the last " + weeks + " weeks, " + pts.length + " weigh-ins. " + words + (split ? " The line is the 7-day average." : "")
+      }) + "</div>" +
+        '<p class="lc-cap">' + esc(words) + "</p>" +
+        (split || anyGap ? '<div class="legend lc-legend" aria-hidden="true">' +
+          (split ? '<span><i class="lg-dot"></i>Weigh-in</span><span><i class="lg-avg"></i>7-day average</span>' : "") +
+          (anyGap ? '<span><i class="lg-gap"></i>More than 2 weeks apart</span>' : "") + "</div>" : "") +
+        '<p class="lc-cap">One weigh-in can be a kilo off either way: water, food, salt. The change over a month says more than one week.</p>';
+    } else {
+      chart = '<p class="empty-line">' + (bw.count < 2 ? "The chart starts with your second weigh-in."
+        : "The chart shows the last 12 weeks and needs two weigh-ins in them.") + "</p>";
+    }
+
+    var shown = all.slice(-12).reverse();
+    var list = shown.map(function (e) {
+      return '<button class="librow exrow" type="button" data-weigh="' + esc(e.id) + '" style="--area:var(--axis)">' +
+        '<span class="libinfo"><span class="libname">' + esc(dayLabel(e.ts) === shortDay(e.ts) ? dayYear(e.ts) : dayLabel(e.ts)) + "</span>" +
+        '<span class="libsub">' + esc(weighText(e)) + (e.note ? " &middot; " + esc(e.note) : "") + "</span></span>" +
+        '<span class="chev" aria-hidden="true">&#8250;</span></button>';
+    }).join("");
+    return sheetHead({
+      title: ico(SCALES) + "Body weight",
+      sub: bw.count + (bw.count === 1 ? " weigh-in" : " weigh-ins") + (bw.first && bw.count > 1 ? " &middot; since " + esc(dayYear(bw.first.ts)) : "")
+    }) +
+      '<div class="sheet-body weightsheet" style="--area:var(--accent)">' + top +
+      "<h4>" + (pts.length >= 2 ? "Last " + weeks + " weeks" : "Chart") + "</h4>" + chart +
+      "<h4>Weigh-ins</h4>" + '<div class="librows">' + list + "</div>" +
+      (all.length > shown.length ? '<p class="hint">The 12 latest. Older ones are in History, under All.</p>' : "") +
+      "<h4>Reading the numbers</h4>" +
+      "<p>Neither up nor down is good or bad by itself. Weight going up while your waist stays the same and your lifts go up usually means muscle. " +
+      "Weight going down while your waist shrinks and your lifts hold usually means fat. Read the three together, over a month.</p>" +
+      "</div>" +
+      '<div class="sheet-foot"><button class="btn primary wide" id="weightAddBtn" type="button">' +
+      (weighInOn(today, null) ? "Change today&#8217;s weigh-in" : "&#65291; Weigh in") + "</button></div>";
+  }
+
+  function wireWeight(sheet) {
+    sheet.querySelectorAll("[data-weigh]").forEach(function (b) {
+      b.addEventListener("click", function () { openWeigh(b.getAttribute("data-weigh")); });
+    });
+    var add = $("#weightAddBtn", sheet);
+    if (add) add.addEventListener("click", function () { openWeigh(); });
+  }
+
   /* ---------- History: numbers, the month, every workout by day ---------- */
 
   var historyView = { month: null, filter: "all", weeks: 2 };   // month: a ts in the month shown
@@ -2014,13 +2507,19 @@
     var head = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map(function (d) {
       return '<th scope="col" abbr="' + d + '">' + d.charAt(0) + "</th>";
     }).join("");
+    // The shown weeks' entries, picked out once for all their days.
+    var from = grid.length ? grid[0][0].ts : 0;
+    var to = grid.length ? addDays(new Date(grid[grid.length - 1][6].ts), 1).getTime() : 0;
+    var shownLog = state.log.filter(function (e) { return e.ts >= from && e.ts < to; });
+    var trainedOn = {};
+    shownLog.forEach(function (e) { if (isTraining(e)) trainedOn[dateStr(e.ts)] = true; });
     var body = grid.map(function (row) {
       return "<tr>" + row.map(function (c) {
         if (!c.inMonth) return "<td></td>";
         var isToday = c.key === todayKey, future = c.key > todayKey;
-        var dd = future ? { groups: [], direct: [] } : TRAINING.dayDots(state.log, c.ts);
+        var dd = future ? { groups: [], direct: [] } : TRAINING.dayDots(shownLog, c.ts);
         var dots = dd.groups;
-        var trained = !future && state.log.some(function (e) { return isTraining(e) && dateStr(e.ts) === c.key; });
+        var trained = !future && trainedOn[c.key] === true;
         var cls = "cal-cell" + (isToday ? " today" : "") + (future ? " future" : "") + (dots.length ? " has" : "");
         var hidden = (isToday || trained) ? '<span class="visually-hidden">' + (isToday ? ", today" : "") +
           (dots.length ? ": " + dotsText(dots, dd.direct) : (trained ? ": trained" : "")) + "</span>" : "";
@@ -2047,6 +2546,17 @@
       stat(TRAINING.weekStreak(state.log, now), "week streak") +
       stat(TRAINING.totalWorkouts(state.log), "in total") +
       '<button class="infobtn" id="hinfoBtn" type="button" aria-label="How workouts and the week streak are counted">&#9432;</button></section>';
+    // Records get their own line under the three workout numbers (a fourth
+    // number doesn't fit a phone); it opens the list of them, with the
+    // milestones.
+    var recs = gym().records, recent = TRAINING.recordsIn(gym(), now).length, nMs = state.milestones.length, recLine = "";
+    if (recs.length || nMs) {
+      var recText = recent ? "<b>" + recent + (recent === 1 ? " record" : " records") + "</b> in the last " + TRAINING.RECORD_DAYS + " days"
+        : (recs.length ? "<b>Records</b> &middot; last one " + agoPhrase(recs[recs.length - 1].ts)
+          : "<b>Milestones</b> &middot; " + nMs + (nMs === 1 ? " step reached" : " steps reached"));
+      recLine = '<div class="today-card wnline"><button class="wn-open" id="recordsBtn" type="button">' + ico(TROPHY) +
+        '<span class="wn-text">' + recText + '</span><span class="chev" aria-hidden="true">&#8250;</span></button></div>';
+    }
     var any = state.log.length || state.milestones.length;
     var list;
     if (!any) {
@@ -2073,14 +2583,12 @@
         (groups.length ? groups.map(function (g) {
           return '<div class="hgroup"><h3 class="hdate">' + esc(dayLabel(g.ts)) + "</h3>" + g.items.join("") + "</div>";
         }).join("") : '<p class="empty-line center">Nothing of this kind in these ' + historyView.weeks + " weeks.</p>") + "</div>" +
-        (older ? '<button class="btn wide" id="showEarlierBtn" type="button">Show earlier</button>' : "") +
-        (state.milestones.length ? '<button class="linkbtn" id="allMilestonesBtn" type="button">All ' + state.milestones.length +
-          (state.milestones.length === 1 ? " milestone" : " milestones") + "</button>" : "");
+        (older ? '<button class="btn wide" id="showEarlierBtn" type="button">Show earlier</button>' : "");
     }
     var chip = function (k, label) {
       return '<button class="chip' + (historyView.filter === k ? " sel" : "") + '" type="button" data-filter="' + k + '" aria-pressed="' + (historyView.filter === k) + '">' + label + "</button>";
     };
-    host.innerHTML = stats + calendarHTML(now) +
+    host.innerHTML = stats + recLine + calendarHTML(now) +
       '<div class="hfilter"><h3 class="sect">By day</h3>' +
       (any ? '<div class="chips" role="group" aria-label="Show" style="--area:var(--accent)">' + chip("all", "All") + chip("gym", "Gym") + chip("bw", "Bodyweight") + "</div>" : "") +
       "</div>" + list;
@@ -2089,8 +2597,8 @@
     on("#hinfoBtn", function () { pushView({ t: "hinfo" }); });
     on("#calPrev", function () { historyView.month = TRAINING.addMonths(historyView.month || now, -1); renderHistory(); focusIn(host, "#calPrev"); });
     on("#calNext", function () { historyView.month = TRAINING.addMonths(historyView.month || now, 1); renderHistory(); focusIn(host, "#calNext"); });
-    on("#showEarlierBtn", function () { historyView.weeks += 2; renderHistory(); });
-    on("#allMilestonesBtn", function () { pushView({ t: "milestones" }); });
+    on("#showEarlierBtn", function () { historyView.weeks += 2; renderHistory(); focusIn(host, $("#showEarlierBtn", host) ? "#showEarlierBtn" : "#hlist .hopen"); });
+    on("#recordsBtn", openRecords);
     host.querySelectorAll("[data-filter]").forEach(function (b) {
       b.addEventListener("click", function () {
         historyView.filter = b.getAttribute("data-filter");
@@ -2118,6 +2626,9 @@
       "<h4>A workout</h4><p>A day you trained. A quick gym log and a skill session on the same day are one workout. A weigh-in isn&#8217;t a workout.</p>" +
       "<h4>Week streak</h4><p>Weeks in a row, Monday to Sunday, with 2 or more workouts. This week joins the streak once it has 2; until then it doesn&#8217;t break it.</p>" +
       "<h4>Instead of the day streak</h4><p>Milo used to count days in a row. Rest days are part of training, so it counts weeks now.</p>" +
+      "<h4>Records</h4><p>A record is a set that beats everything you did before in that gym exercise. With weights: a heavier weight than ever, in a set that is " +
+      "no more than two reps short of the fewest you aim for (at least 6 reps if you aim for 8&#8211;12). Without weights: more reps in one set, or a hold that reaches the next 5 seconds. " +
+      "Warm-ups never count, and the first day of an exercise only sets the mark to beat.</p>" +
       "</div>";
   }
 
@@ -2126,23 +2637,78 @@
     return null;
   }
 
-  // A gym exercise or a weigh-in, logged by a newer version of Milo: this one
-  // can show it and delete it, not change it.
-  function entryPaneHTML(e) {
-    return sheetHead({ title: e.kind === "body" ? "Weigh-in" : "Gym exercise", sub: esc(longDay(e.ts)) }) +
-      '<div class="sheet-body history">' + entryRowHTML(e, true) +
-      '<p class="hint">A newer version of Milo logged this. This version can show it and delete it; to change it, update the app on this device.</p>' +
-      '<button class="btn danger wide qdel" id="deleteEntry" type="button">Delete this entry</button></div>';
+  // "Today", "Yesterday", else the day — with its year once that isn't this one.
+  function dayHead(ts) {
+    var l = dayLabel(ts);
+    return l === shortDay(ts) ? dayYear(ts) : l;
   }
 
-  function milestonesPaneHTML() {
-    var ms = state.milestones.slice().sort(function (a, b) { return b.ts - a.ts; });
-    return sheetHead({ title: "&#127941; Milestones", sub: ms.length + (ms.length === 1 ? " step reached" : " steps reached") }) +
+  /* ---- Records and milestones, newest first ---- */
+
+  var recordsView = { filter: "all", shown: 40 };
+  function openRecords() { recordsView = { filter: "all", shown: 40 }; pushView({ t: "records" }); }
+
+  function recordRowHTML(r) {
+    var ex = TRAINING.exercise(r.exId);
+    if (!ex) return "";
+    return '<div class="hitem rec" data-kind="gym" style="--area:' + exColor(ex) + '">' +
+      '<button class="hopen" type="button" data-rec="' + esc(r.exId) + '"><span class="hswatch"></span>' +
+      '<span class="hinfo"><span class="hname">' + ico(TROPHY) + esc(ex.name) + "</span>" +
+      '<span class="hsets">Record: ' + esc(oneSet(ex, r.kg, r.reps)) + "</span></span>" +
+      '<span class="chev" aria-hidden="true">&#8250;</span></button></div>';
+  }
+
+  function recordsPaneHTML() {
+    var recs = gym().records, ms = state.milestones, f = recordsView.filter;
+    var items = [];
+    if (f !== "ms") recs.forEach(function (r) { items.push({ ts: r.ts, r: r }); });
+    if (f !== "rec") ms.forEach(function (m) { items.push({ ts: m.ts, m: m }); });
+    items.sort(function (x, y) { return y.ts - x.ts; });
+    var groups = [];
+    items.slice(0, recordsView.shown).forEach(function (it) {
+      var html = it.r ? recordRowHTML(it.r) : milestoneRowHTML(it.m);
+      if (!html) return;
+      var k = dateStr(it.ts);
+      if (!groups.length || groups[groups.length - 1].k !== k) groups.push({ k: k, ts: it.ts, items: [] });
+      groups[groups.length - 1].items.push(html);
+    });
+    var chip = function (k, label) {
+      return '<button class="chip' + (f === k ? " sel" : "") + '" type="button" data-rfilter="' + k + '" aria-pressed="' + (f === k) + '">' + label + "</button>";
+    };
+    var empty = f === "ms" ? "Milestones appear here as you reach new steps."
+      : "No records yet. A record is a set that beats everything you did before in that exercise; the first day only sets the mark to beat.";
+    return sheetHead({
+      title: ico(TROPHY) + "Records and milestones",
+      sub: recs.length + (recs.length === 1 ? " record" : " records") + " &middot; " + ms.length + (ms.length === 1 ? " milestone" : " milestones")
+    }) +
       '<div class="sheet-body history">' +
-      (ms.length ? ms.map(function (m) {
-        return '<div class="hgroup"><h3 class="hdate">' + esc(dayLabel(m.ts)) + "</h3>" + milestoneRowHTML(m) + "</div>";
-      }).join("") : '<p class="empty-line center">Milestones appear here as you reach new steps.</p>') +
+      '<div class="chips" role="group" aria-label="Show" style="--area:var(--accent)">' + chip("all", "All") + chip("rec", "Records") + chip("ms", "Milestones") + "</div>" +
+      (groups.length ? groups.map(function (g) {
+        return '<div class="hgroup"><h3 class="hdate">' + esc(dayHead(g.ts)) + "</h3>" + g.items.join("") + "</div>";
+      }).join("") : '<p class="empty-line center">' + empty + "</p>") +
+      (items.length > recordsView.shown ? '<button class="btn wide" id="recEarlier" type="button">Show earlier</button>' : "") +
       "</div>";
+  }
+
+  function wireRecords(sheet) {
+    sheet.querySelectorAll("[data-rfilter]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        recordsView.filter = b.getAttribute("data-rfilter");
+        recordsView.shown = 40;
+        renderSheet();
+        focusIn($("#sheet"), '[data-rfilter="' + recordsView.filter + '"]');
+      });
+    });
+    var more = $("#recEarlier", sheet);
+    if (more) more.addEventListener("click", function () {
+      recordsView.shown += 40;
+      renderSheet();
+      var s = $("#sheet");
+      focusIn(s, $("#recEarlier", s) ? "#recEarlier" : "#sheetTitle");
+    });
+    sheet.querySelectorAll(".hopen[data-rec]").forEach(function (b) {
+      b.addEventListener("click", function () { pushView({ t: "exercise", x: b.getAttribute("data-rec") }); });
+    });
   }
 
   /* ---------- ＋ Log: what did you train? ---------- */
@@ -2161,13 +2727,18 @@
       return pickRowHTML('data-area="' + p.areaIdx + '"', areaColorVar(p.area), p.area.icon,
         esc(p.stepObj.name) + " &middot; step " + p.step, esc(prescriptionLine(p)) + " &middot; " + esc(goalPhrase(p)));
     }).join("") + "</div>" : "";
-    return sheetHead({ title: "&#65291; Log", sub: "What did you train?" }) +
+    var todayW = weighInOn(quickDays().today, null), lastW = TRAINING.bodyWeight(state.log, nowMs()).last;
+    var weighSub = todayW ? "Today: " + esc(fmtKg(todayW.kg)) + " kg. Tap to change it."
+      : (lastW ? "Last " + esc(dayYear(lastW.ts)) + ": " + esc(fmtKg(lastW.kg)) + " kg" : "Body weight, about once a week.");
+    return sheetHead({ title: "&#65291; Log", sub: "What do you want to log?" }) +
       '<div class="sheet-body logpick">' + planRows +
       "<h4>" + (plan.length ? "Other skills" : "Skills") + "</h4>" + '<div class="librows">' +
       pickRowHTML('id="pickSkill"', "var(--axis)", "&#129336;", plan.length ? "Another skill" : "Skill session", "Pick one of the six ladders, at your step.") + "</div>" +
       "<h4>Gym</h4>" + '<div class="librows">' +
       pickRowHTML('id="pickGym"', "var(--accent)", "&#127947;&#65039;", "Gym exercise", "Reps and kg, set by set, with a suggestion for each.") +
       pickRowHTML('id="pickQuick"', "var(--accent)", "&#9889;", "Quick gym log", "Only the sets per muscle group, no exercises.") + "</div>" +
+      "<h4>Body weight</h4>" + '<div class="librows">' +
+      pickRowHTML('id="pickWeigh"', "var(--axis)", SCALES, "Weigh-in", weighSub) + "</div>" +
       "</div>";
   }
 
@@ -2190,17 +2761,17 @@
   /* ---------- What's new (once, after this update) ---------- */
 
   function whatsNewPaneHTML() {
-    var t = TRAINING.targets(state.settings.vol);
     return sheetHead({ title: ico("&#10024;") + "What&#8217;s new in Milo", sub: "Once, after this update" }) +
       '<div class="sheet-body volinfo whatsnew">' +
-      "<h4>Four tabs</h4><p><b>Today</b>: your session, the week at a glance and one tip. <b>Body</b>: your six muscle groups this week. " +
-      "<b>Skills</b>: the six ladders, as the home screen had them. <b>History</b>: every workout, the calendar and your numbers.</p>" +
-      "<h4>&#65291; Log, in the middle</h4><p>From any tab: a skill from today&#8217;s session in one tap, another skill, or a quick gym log (sets per muscle group).</p>" +
-      "<h4>Gym and skills count together</h4><p>Body adds up the hard sets from quick gym logs and skill sessions against a weekly target: " +
-      t.chest[0] + "&#8211;" + t.chest[1] + " per group, " + t.arms[0] + "&#8211;" + t.arms[1] + " for arms and legs.</p>" +
-      '<h4>Where things went</h4><ul class="nc-list"><li>Stats and the calendar: <b>History</b>.</li><li>Week plan: the link on <b>Today&#8217;s session</b>.</li>' +
-      "<li>Deleting a workout: open it in History; Delete is at the bottom.</li><li>&#8220;Log gym day&#8221; is now <b>Quick gym log</b>.</li></ul>" +
-      "<h4>What&#8217;s gone</h4><p>The day streak and longest streak. Rest days are part of training, so History counts a <b>week streak</b> instead: weeks in a row with 2 or more workouts.</p>" +
+      "<h4>Records</h4><p>When a set beats everything you did before in that exercise, Milo tells you as you tick it, marks it in History with a " + ico(TROPHY) +
+      '<span class="visually-hidden">trophy</span>' +
+      " and keeps the list under <b>History</b>. With weights, a record is a heavier weight than ever, in a proper set. Warm-ups never count, and the first day of an exercise only sets the mark to beat.</p>" +
+      "<h4>A chart for every exercise</h4><p>Tap the &#9432; next to an exercise&#8217;s name while you log it: your latest sessions as a line, and your records under it. " +
+      "For most weights the line is your <b>estimated 1-rep max</b>: the most you could probably lift once, worked out from your best set of the day.</p>" +
+      "<h4>Weekly weigh-in</h4><p><b>&#65291; Log</b> &#8594; Weigh-in, or the Body weight card at the top of <b>Body</b>. Once a week is enough; add your waist if you like. " +
+      "Body shows your latest weight, the change since last time and a chart. When a week has gone by, Today reminds you.</p>" +
+      "<h4>Your main exercise on Body</h4><p>Each muscle group&#8217;s card now names the gym exercise you train it with most, and its latest top set. Open the group to see all of them.</p>" +
+      (syncCfg ? "<h4>Sync space</h4><p>Settings now shows how full your sync space is.</p>" : "") +
       "</div>" + '<div class="sheet-foot"><button class="btn primary wide" id="whatsNewDone" type="button">Got it</button></div>';
   }
 
@@ -2410,6 +2981,7 @@
      finds warm-up sets and suggests the next session. */
 
   var GYM_DRAFT_KEY = "milo.gymDraft";
+  var recToastUntil = 0;      // while a "New record" toast is up
   var gymDraft = null;      // the top gym view's draft: { exId, entryId, date, pick, rows: [{ kg, reps, done, savedKg, savedReps }], note, dirty, shown }
   var LOAD_UNIT = { ext: "kg", added: "kg added", assist: "kg assist" };
 
@@ -2443,6 +3015,12 @@
     var suffix = ex && ex.load === "assist" ? " kg assist" : (ex && ex.load === "added" ? " kg added" : " kg");
     if (one) return sets.join(", ") + (ex && ex.timed ? " sec" : "") + " × " + fmtW(kg[0]) + suffix;
     return sets.map(function (r, i) { return r + " × " + fmtW(kg[i]); }).join(", ") + suffix;
+  }
+  // One set, written like every other set here: "5 × 43.25 kg", "6 × 2.5 kg
+  // added", "16 reps", "1 rep", "45 sec". For records and a group's exercise.
+  function oneSet(ex, kg, reps) {
+    if (hasKg(ex) && kg > 0) return setsText(ex, [reps], [kg]);
+    return reps + (ex && ex.timed ? " sec" : (reps === 1 ? " rep" : " reps"));
   }
   // The counted sets of a gym entry, and how many warm-ups it has besides.
   // only: every set is a warm-up (marked by hand) — then `sets` lists them.
@@ -2597,6 +3175,40 @@
     var rows = d.rows.filter(function (r) { return !r.done && r.reps !== ""; })
       .map(function (r) { return { kg: r.kg, reps: r.reps, warm: !!r.warm }; });
     writeGymDraftSlot(d.exId, rows.length || d.note || d.entryId ? { entryId: d.entryId, rows: rows, note: d.note || "" } : null);
+  }
+
+  // The record an exercise set on one day (TRAINING.gymIndex), or null.
+  function dayRecord(exId, dateKey) {
+    var x = gym().byEx[exId];
+    if (!x) return null;
+    for (var k = x.days.length - 1; k >= 0 && x.days[k].day >= dateKey; k--) {
+      if (x.days[k].day === dateKey) return x.days[k].rec;
+    }
+    return null;
+  }
+
+  // What a set has to beat for a record, in words: "42.5 kg, in a set of 6
+  // reps or more", "16 reps", "44 sec". mark: TRAINING.standing().show. With
+  // weight on only the weight counts (more reps at it is no record), so the
+  // reps of the set that holds the mark are left out.
+  function toBeatText(ex, mark) {
+    if (!(hasKg(ex) && mark.kg > 0)) return oneSet(ex, 0, mark.reps);
+    var floor = TRAINING.recordFloor(ex.id);
+    return fmtW(mark.kg) + (ex.load === "assist" ? " kg of help" : (ex.load === "added" ? " kg added" : " kg")) +
+      (floor > 1 ? ", in a set of " + floor + " reps or more" : "");
+  }
+  // The gym sheet's line under "Last time": what there is to beat (as it
+  // stood before the sheet's day), or — once a ticked set of that day has
+  // beaten it — the new record: the lasting sign of it, since a toast is
+  // easy to miss between sets.
+  function gymRecHTML(d, ex) {
+    var dayRec = dayRecord(d.exId, d.date);
+    if (dayRec) {
+      return '<p class="glast grec"><b>' + ico(TROPHY) + "New record " + (d.date === quickDays().today ? "today" : "that day") + ":</b> " +
+        esc(oneSet(ex, dayRec.kg, dayRec.reps)) + "</p>";
+    }
+    var mark = TRAINING.standing(gym(), d.exId, dateFromKey(d.date)).show;
+    return mark ? '<p class="glast grec"><b>To beat</b> &middot; ' + esc(toBeatText(ex, mark)) + "</p>" : "";
   }
 
   function gymSuggestion(exId, excludeId) {
@@ -2772,6 +3384,7 @@
       '<div class="chips" role="group" aria-label="Day">' + chip("today", "Today") + chip("yesterday", "Yesterday") + chip("pick", "Pick a day") + "</div>" +
       (mode === "pick" ? '<label class="visually-hidden" for="gymDate">Day you trained</label><input type="date" id="gymDate" class="qdate" value="' + esc(d.date) + '" min="2000-01-01" max="' + k.today + '">' : "") +
       (last ? '<p class="glast"><b>Last time</b> &middot; ' + esc(dayLabel(last.ts)) + ": " + esc(lastSetsText(ex, last)) + "</p>" : "") +
+      '<div id="gymRec">' + gymRecHTML(d, ex) + "</div>" +
       suggestionHTML(ex, sg) +
       '<ol class="gsets" aria-label="Sets">' + rows + "</ol>" +
       '<p class="hint gtip">Tick &#10003; each set as you finish it: it&#8217;s saved straight away' +
@@ -2913,6 +3526,13 @@
     if (!d) return;
     var ex = TRAINING.exercise(d.exId);
     var inc = ex && ex.inc ? ex.inc : 2.5;
+    // A ticked set corrected in its box: the "To beat" / "New record" line
+    // follows what is saved. In place — a redraw there would take the box
+    // just focused (and the iPhone's keyboard) away.
+    function paintRec() {
+      var el = $("#gymRec", sheet);
+      if (el) el.innerHTML = gymRecHTML(d, ex);
+    }
 
     sheet.querySelectorAll(".gday").forEach(function (b) {
       b.addEventListener("click", function () {
@@ -2951,7 +3571,7 @@
           var next = Math.max(0, MODEL.roundKg(cur + Number(b.getAttribute("data-kg")) * inc));
           r.kg = String(fmtW(next));
           kgIn.value = r.kg;
-          if (r.done) { d.dirty = true; commitGym(); } else saveGymDraft();
+          if (r.done) { d.dirty = true; commitGym(); paintRec(); } else saveGymDraft();
         });
       });
       [kgIn, repIn].forEach(function (inp) {
@@ -2959,7 +3579,7 @@
         inp.addEventListener("change", function () {
           readGymInputs(sheet);
           if (r.done) {
-            if (gymRowsValid(false)) { d.dirty = true; commitGym(); }
+            if (gymRowsValid(false)) { d.dirty = true; commitGym(); paintRec(); }
             if (kgIn) kgIn.value = r.kg;
             if (repIn) repIn.value = r.reps;
           } else saveGymDraft();
@@ -2981,16 +3601,25 @@
       });
       tick.addEventListener("click", function () {
         readGymInputs(sheet);
+        var recToast = "";
         if (!r.done) {
           if (r.reps === "" && repIn && repIn.placeholder !== "") r.reps = repIn.placeholder;
           var reps = Math.round(Number(r.reps));
           if (r.reps === "" || !isFinite(reps) || reps < 1) { toast("Enter the " + repUnit(ex) + " first"); if (repIn) repIn.focus(); return; }
           if (kgTypedBad(r.kg)) { toast("That weight isn't a number"); if (kgIn) kgIn.focus(); return; }
           if (hasKg(ex) && r.kg === "" && ex && ex.load === "ext") { toast("Enter the weight first"); if (kgIn) kgIn.focus(); return; }
+          // A record: only for a set ticked in today's sheet, only once it is
+          // really saved, and only when the day's record is new or better
+          // than it was a moment ago (a second equal set says nothing).
+          var live = d.date === quickDays().today, was = live ? dayRecord(d.exId, d.date) : null;
           r.done = true;
           d.dirty = true;
           var ok = commitGym();
           if (ok && state.settings.autoRest && !readOnly) startRest(state.settings.restGym, { gym: true });
+          var now = ok && live && storageOk && !readOnly ? dayRecord(d.exId, d.date) : null;
+          if (now && (!was || now.kg !== was.kg || now.reps !== was.reps || now.by !== was.by)) {
+            recToast = "\ud83c\udfc6 New record: " + oneSet(ex, now.kg, now.reps);
+          }
         } else {
           r.done = false;
           d.dirty = true;
@@ -2998,6 +3627,8 @@
         }
         renderSheet();
         focusIn($("#sheet"), '.gset[data-i="' + i + '"] .gtick');
+        // After the focus move, or a screen reader would cut it off.
+        if (recToast) { toast(recToast, 4000); recToastUntil = nowMs() + 4000; }
       });
     });
 
@@ -3058,7 +3689,12 @@
     var logged = !!d.entryId;
     gymDraft = null;
     leaveGym(next);
-    if (logged && d.dirty) toast(storageOk && !readOnly ? exName(d.exId) + " saved ✓" : notSavedMsg());
+    // "Not saved" always shows; "saved" waits its turn behind a record
+    // toast that is still up (Save → next is often tapped right after the tick).
+    if (logged && d.dirty) {
+      if (!(storageOk && !readOnly)) toast(notSavedMsg());
+      else if (nowMs() >= recToastUntil) toast(exName(d.exId) + " saved ✓");
+    }
   }
 
   // Close the gym sheet (and the pickers under it); with next, land on the
@@ -3072,19 +3708,107 @@
 
   /* ---- One exercise: numbers, its settings, its history ---- */
 
+  // The chart of an exercise's latest sessions, with its words. "" when there
+  // is nothing to chart yet. What is plotted depends on the exercise
+  // (TRAINING.trend): an estimated 1-rep max, a top weight, reps or seconds.
+  var CHART_NAME = { e1rm: "Estimated 1-rep max", assist: "Help from the machine", reps: "Most reps in a set", secs: "Longest hold" };
+  function exerciseChartHTML(ex) {
+    var tr = TRAINING.trend(gym(), ex.id), pts = tr.points, kind = tr.kind;
+    if (!pts.length) return "";
+    var title = kind === "kg" ? (ex.load === "added" ? "Top added weight" : "Top weight") : CHART_NAME[kind];
+    if (pts.length < 2) return "<h4>" + title + '</h4><p class="empty-line">The chart starts with your second session.</p>';
+    var weight = kind !== "reps" && kind !== "secs";
+    // A value as it is shown: the estimate to the nearest ½ kg, like the table.
+    var num = function (v) { return kind === "e1rm" ? Math.round(v * 2) / 2 : v; };
+    var amount = function (v) { return weight ? fmtW(v) + " kg" : (kind === "secs" ? v + " sec" : v + (v === 1 ? " rep" : " reps")); };
+    // A record day's hover text names the record's own set: the plotted
+    // value can be another set of that day (a heavier one under the floor).
+    var recTip = function (p) {
+      var r = p.record ? dayRecord(ex.id, p.day) : null;
+      return r ? " · " + (kind === "e1rm" ? "new top weight" : "record") + ": " + oneSet(ex, r.kg, r.reps) : "";
+    };
+    var a = pts[0], b = pts[pts.length - 1], lo = Infinity, hi = -Infinity, peak = a, recN = 0, anyGap = false;
+    // Dates under the ends: with the year only when the two differ in it.
+    var years = new Date(a.ts).getFullYear() !== new Date(b.ts).getFullYear();
+    var dm = function (ts) { var d = new Date(ts); return d.getDate() + " " + MON_SHORT[d.getMonth()] + (years ? " " + d.getFullYear() : ""); };
+    var points = pts.map(function (p, i) {
+      lo = Math.min(lo, p.value); hi = Math.max(hi, p.value);
+      if (kind === "assist" ? p.value < peak.value : p.value > peak.value) peak = p;
+      if (p.record) recN++;
+      // A long break (the same one that makes the next session start lighter) is drawn dotted.
+      var gap = i > 0 && dayDelta(pts[i - 1].ts, p.ts) > TRAINING.RETURN_DAYS;
+      if (gap) anyGap = true;
+      return {
+        x: i / (pts.length - 1), v: p.value, big: p.record, gap: gap,
+        tip: shortDay(p.ts) + ": " + amount(num(p.value)) + (kind === "e1rm" ? " (" + oneSet(ex, p.kg, p.reps) + ")" : "") + recTip(p)
+      };
+    });
+    var diff = num(b.value) - num(a.value), by = amount(Math.abs(diff));
+    var words = diff === 0 ? amount(num(a.value)) + " on " + dm(a.ts) + " and on " + dm(b.ts) + ": no change."
+      : "From " + amount(num(a.value)) + (kind === "assist" ? " of help" : "") + " on " + dm(a.ts) + " to " + amount(num(b.value)) + " on " + dm(b.ts) + ": " +
+        (kind === "assist" ? by + (diff < 0 ? " less help." : " more help.") : (diff > 0 ? "up " : "down ") + by + ".");
+    var explain = kind === "e1rm"
+      ? "Your estimated 1-rep max is the most you could probably lift once, worked out from the best set of each day. It often dips on the day you go up in weight, because you start again at fewer reps. A yardstick, not a weight to try." +
+        (ex.perHand ? " Per hand, like the weights you log." : "")
+      : (kind === "kg" ? (ex.load === "added" ? "The most weight you added each day (0 is your bodyweight alone)." : "The heaviest counted set of each day.")
+        : (kind === "assist" ? "The least help you used each day. Lower is harder."
+          : (kind === "secs" ? "Your longest hold each day, in seconds." : "Your most reps in one set each day.")));
+    var aria = title + " for " + ex.name + " over the last " + pts.length + " sessions. " + words + " " +
+      (kind === "assist" ? "Least help " : "Highest ") + amount(num(peak.value)) + " on " + dm(peak.ts) + "." +
+      (recN ? (kind === "e1rm" ? " New top weight on " : " A record on ") + recN + " of these days." : "");
+    return "<h4>" + title + " &middot; last " + pts.length + " sessions</h4>" +
+      '<div class="lc">' + lineChartSVG(points, {
+        scale: TRAINING.chartScale(lo, hi, weight ? Math.max(4, 0.15 * hi) : (kind === "secs" ? 20 : 4)),
+        left: dm(a.ts), right: dm(b.ts), end: weight ? fmtW(num(b.value)) : String(b.value), aria: aria
+      }) + "</div>" +
+      '<p class="lc-cap">' + esc(words) + " " + esc(explain) + "</p>" +
+      (recN || anyGap ? '<div class="legend lc-legend" aria-hidden="true">' +
+        (recN ? '<span><i class="lg-rec"></i>' + (kind === "e1rm" ? "New top weight" : "Record day") + "</span>" : "") +
+        (anyGap ? '<span><i class="lg-gap"></i>More than 6 weeks off</span>' : "") + "</div>" : "");
+  }
+
+  // What a record is for this exercise, in one or two plain sentences.
+  function recordRuleText(ex) {
+    var floor = TRAINING.recordFloor(ex.id), n = floor + (floor === 1 ? " rep" : " reps");
+    if (ex.timed) return "A record is a hold that reaches the next " + TRAINING.TIMED_STEP + " seconds: 45, 50, 55…";
+    if (!floor) return "A record is more reps in one set than ever before.";
+    if (ex.load === "assist") return "A record is less help than ever before, in a set of at least " + n + ".";
+    if (ex.load === "added") return "A record is more added weight than ever before, in a set of at least " + n + ". With no weight on, it is more reps in one set than ever.";
+    return "A record is a heavier weight than ever before, in a set of at least " + n + ". More reps at the same weight isn’t one: the chart shows those.";
+  }
+
   function exercisePaneHTML(exId) {
     var ex = TRAINING.exercise(exId);
     if (!ex) return "";
     var sessions = TRAINING.sessionsFor(state.log, exId, {});
+    var x = gym().byEx[exId] || null, st = TRAINING.standing(gym(), exId);
     var best = TRAINING.best(state.log, exId);
     var unit = repUnit(ex);
+    var row = function (label, value) { return '<div class="stdrow"><span class="lb">' + label + "</span><strong>" + esc(value) + "</strong></div>"; };
+    // The marks there are to beat (TRAINING.standing): what the gym sheet's
+    // "To beat" line, the trophies and the toast go by. With weight on it is
+    // the top weight done in a set that counts (a heavier try under the
+    // floor isn't it), hence "to beat" rather than "heaviest".
+    var marks = "", plain = !hasKg(ex) || ex.timed;
+    if (st.w && st.w.kg > 0) marks += row(ex.load === "assist" ? "Help to beat" : "Weight to beat", oneSet(ex, st.w.kg, st.w.reps) + " · " + dayYear(st.w.ts));
+    if (st.r) marks += row(ex.timed ? "Longest hold" : (plain ? "Most reps" : (ex.load === "assist" ? "Most reps, no help" : "Most reps, no weight on")),
+      (ex.timed ? st.r.reps + " sec" : String(st.r.reps)) + " · " + dayYear(st.r.ts));
+    if (!marks && best) marks = row("Best set", best.kg ? best.reps + (ex.timed ? " sec" : "") + " × " + fmtW(best.kg) + (ex.load === "assist" ? " kg assist" : (ex.load === "added" ? " kg added" : " kg")) : best.reps + " " + unit);
     var numbers = sessions.length
-      ? '<div class="stdtable">' +
-        '<div class="stdrow"><span class="lb">Sessions</span><strong>' + sessions.length + "</strong></div>" +
-        (best ? '<div class="stdrow"><span class="lb">Best set</span><strong>' + esc(best.kg ? best.reps + (ex.timed ? " sec" : "") + " \u00d7 " + fmtW(best.kg) + (ex.load === "assist" ? " kg assist" : (ex.load === "added" ? " kg added" : " kg")) : best.reps + " " + unit) + "</strong></div>" : "") +
-        (best && best.e1rm ? '<div class="stdrow"><span class="lb">Estimated 1-rep max</span><strong>' + esc(fmtW(Math.round(best.e1rm * 2) / 2)) + " kg</strong></div>" : "") +
+      ? '<div class="stdtable">' + row("Sessions", String(x ? x.days.length : 0)) + marks +
+        (best && best.e1rm && ex.hi <= TRAINING.E1RM_MAX_HI
+          ? row("Best estimated 1-rep max", fmtW(Math.round(best.e1rm * 2) / 2) + " kg (from " + oneSet(ex, best.kg, best.reps) + ")") : "") +
         "</div>"
       : '<p class="empty-line">Not logged yet.</p>';
+    var recs = x ? x.records.slice().reverse() : [], nDays = x ? x.days.length : 0;
+    var records = !sessions.length ? "" : "<h4>Records</h4>" +
+      (recs.length
+        ? '<div class="stdtable">' + recs.slice(0, 10).map(function (r) { return row(esc(dayYear(r.ts)), oneSet(ex, r.kg, r.reps)); }).join("") + "</div>" +
+          (recs.length > 10 ? '<p class="hint">The latest 10 of ' + recs.length + ".</p>" : "")
+        : '<p class="empty-line">' + (nDays > 1
+          ? "No records yet." + (st.show ? " The mark to beat is " + esc(oneSet(ex, st.show.kg, st.show.reps)) + ", from " + esc(dayYear(st.show.ts)) + "." : "")
+          : "Your first day sets the mark to beat. Beat it and the record shows here.") + "</p>") +
+      '<p class="hint">' + esc(recordRuleText(ex)) + " The first day only sets the mark to beat.</p>";
     var hist = sessions.slice(0, 12).map(function (e) {
       return '<button class="librow" type="button" data-edit="' + esc(e.id) + '" style="--area:' + exColor(ex) + '">' +
         '<span class="libinfo"><span class="libname">' + esc(dayLabel(e.ts)) + "</span>" +
@@ -3096,9 +3820,12 @@
         '<input class="stepval" type="text" inputmode="decimal" id="' + id + '" value="' + esc(String(val)) + '" data-min="' + min + '" data-max="' + max + '" data-step="' + step + '" aria-labelledby="' + id + 'L">' +
         '<button type="button" class="stepbtn" data-ex-step="' + id + '" data-dir="1" aria-label="Raise ' + label.toLowerCase() + '">&#43;</button></span></div>';
     };
+    // The chart sits under the numbers; the settings (with the setup note,
+    // read mid-workout) stay above the two dated lists, the longest last.
     return sheetHead({ title: '<span class="swatch" style="--area:' + exColor(ex) + '"></span>' + esc(ex.name), sub: exSubline(ex) }) +
       '<div class="sheet-body exsheet" style="--area:' + exColor(ex) + '">' +
       "<h4>Your numbers</h4>" + numbers +
+      exerciseChartHTML(ex) +
       "<h4>For this exercise</h4>" +
       "<p>The suggestions aim for " + ex.lo + "&#8211;" + ex.hi + " " + unit + " a set" + (hasKg(ex) ? ", and go up " + fmtW(ex.inc) + " kg at a time" : "") + ". Change them if your gym or your body say otherwise.</p>" +
       stepper("exLo", "Fewest " + unit, ex.lo, 1, 600, 1) +
@@ -3106,6 +3833,7 @@
       (hasKg(ex) ? stepper("exInc", "Weight step (kg)", fmtW(ex.inc), 0.25, 50, 0.25) : "") +
       '<label class="vlab exnotel" for="exNote">Setup note</label>' +
       '<input type="text" id="exNote" class="exnote" maxlength="80" value="' + esc(ex.note || "") + '" placeholder="Seat 4, pin 7, narrow grip&#8230;">' +
+      records +
       (hist ? "<h4>History</h4>" + '<div class="librows">' + hist + "</div>" : "") +
       (ex.custom ? '<div class="btnrow"><button class="btn" id="exEditBtn" type="button">Edit this exercise</button>' +
         '<button class="btn danger" id="exDelBtn" type="button">Remove from the list</button></div>' : "") +
@@ -3368,7 +4096,8 @@
     if (!e) return;
     if (e.kind === "quick") { openQuick(id); return; }
     if (e.kind === "gym") { openGym(e.exId, id); return; }
-    if (e.kind) { pushView({ t: "entry", x: id }); return; }
+    if (e.kind === "body") { openWeigh(id); return; }
+    if (e.kind) return;     // a kind this version doesn't know: the sanitizer never lets one in
     var ai = areaIndexById(e.areaId);
     logDraft = { key: "edit:" + id, sets: e.sets.map(String), note: e.note || "", editId: id, variant: e.variant || "" };
     pushView({ t: "log", a: ai, s: e.step - 1 });
@@ -3475,8 +4204,9 @@
       case "logskill": return "Skill session";
       case "whatsnew": return "What's new";
       case "hinfo": return "Workouts";
-      case "milestones": return "Milestones";
-      case "entry": return "Entry";
+      case "records": return "Records";
+      case "weigh": return "Weigh-in";
+      case "weight": return "Body weight";
       case "gympick": return "Exercises";
       case "gym": return exName(v.x);
       case "exercise": return exName(v.x);
@@ -3599,8 +4329,9 @@
     else if (view.t === "logskill") sheet.innerHTML = logSkillPaneHTML();
     else if (view.t === "whatsnew") sheet.innerHTML = whatsNewPaneHTML();
     else if (view.t === "hinfo") sheet.innerHTML = hinfoPaneHTML();
-    else if (view.t === "milestones") sheet.innerHTML = milestonesPaneHTML();
-    else if (view.t === "entry" && entryById(view.x)) sheet.innerHTML = entryPaneHTML(entryById(view.x));
+    else if (view.t === "records") sheet.innerHTML = recordsPaneHTML();
+    else if (view.t === "weigh" && weighDraft) sheet.innerHTML = weighPaneHTML();
+    else if (view.t === "weight" && state.log.some(isWeighIn)) sheet.innerHTML = weightPaneHTML();
     else if (view.t === "gympick") sheet.innerHTML = gymPickPaneHTML();
     else if (view.t === "gym" && view.g) { gymDraft = view.g; sheet.innerHTML = gymPaneHTML(); }
     else if (view.t === "exercise" && TRAINING.exercise(view.x)) sheet.innerHTML = exercisePaneHTML(view.x);
@@ -3988,11 +4719,10 @@
 
   function fmtKg(x) { return String(Math.round(x * 100) / 100); }
 
-  // One row in History or a day's list. Skill sessions open the log form and
-  // quick gym logs their own sheet; gym-exercise and weigh-in entries (from
-  // newer versions of the app) open a sheet that can delete but not edit them.
-  function entryRowHTML(e, staticRow) {
-    var color, name, detail;
+  // One row in History or a day's list. Tapping it opens the sheet that
+  // logged it: the skill form, the quick sheet, the gym sheet or the weigh-in.
+  function entryRowHTML(e) {
+    var color, name, detail, extra = "";
     if (!e.kind) {
       var a = AREAS[areaIndexById(e.areaId)];
       if (!a) return "";
@@ -4001,10 +4731,12 @@
       name = ico(a.icon) + esc(e.variant || step.name);
       detail = esc(shortAreaName(a) + " step " + e.step + " \u00b7 " + setsSummary(e, step));
     } else if (e.kind === "gym") {
-      var gx = TRAINING.exercise(e.exId);
+      var gx = TRAINING.exercise(e.exId), rec = gym().byEntry[e.id];
       color = exColor(gx);
       name = ico("&#127947;&#65039;") + esc(gx ? gx.name : "Unknown exercise");
       detail = esc(gymEntryText(e));
+      // The record this entry holds, as a third line of its own row.
+      if (rec) extra = '<span class="hrec">' + ico(TROPHY) + "Record: " + esc(oneSet(gx, rec.kg, rec.reps)) + "</span>";
     } else if (e.kind === "quick") {
       // "13 sets: Chest 4, Back 3, Arms 6" (commas, so the " · note" after it
       // stays apart), swatch in the biggest group's colour.
@@ -4016,7 +4748,7 @@
       detail = esc(total + (total === 1 ? " set: " : " sets: ") + gs.map(function (g) { return groupName(g) + " " + e.groups[g]; }).join(", "));
     } else if (e.kind === "body") {
       color = "var(--axis)";
-      name = "&#9878;&#65039; Weigh-in";
+      name = ico(SCALES) + "Weigh-in";
       detail = esc(fmtKg(e.kg) + " kg" + (e.waist ? " · waist " + fmtKg(e.waist) + " cm" : ""));
     } else {
       return "";
@@ -4025,11 +4757,11 @@
     return '<div class="hitem" data-kind="' + entryFilterKind(e) + '" style="--area:' + color + '">' +
       // No aria-label here: it would mask the exercise/sets text inside,
       // which is exactly what a screen-reader user needs to hear.
-      (staticRow ? '<div class="hopen">' : '<button class="hopen" type="button" data-id="' + esc(e.id) + '">') +
+      '<button class="hopen" type="button" data-id="' + esc(e.id) + '">' +
       '<span class="hswatch"></span>' +
       '<span class="hinfo"><span class="hname">' + name + "</span>" +
-      '<span class="hsets">' + detail + (e.note ? " &middot; " + esc(e.note) : "") + "</span></span>" +
-      (staticRow ? "</div></div>" : '<span class="chev" aria-hidden="true">&#8250;</span></button></div>');
+      '<span class="hsets">' + detail + (e.note ? " &middot; " + esc(e.note) : "") + "</span>" + extra + "</span>" +
+      '<span class="chev" aria-hidden="true">&#8250;</span></button></div>';
   }
 
   /* ---------- A day (from the calendar or Today's week) ---------- */
@@ -4051,7 +4783,8 @@
       '<div class="sheet-body history">' +
       (line ? '<p class="dayline"><b>Hard sets that day:</b> ' + line + "</p>" : "") +
       (dots.length ? '<div class="dayslots">' + slots(dots, dd.direct) + "<span>Dots: the groups with 1 hard set or more. Solid: trained directly. Ring: only as a helper.</span></div>" : "") +
-      (es.length ? es.map(entryRowHTML).join("") : '<p class="empty">Nothing logged on this day.</p>') +
+      // (Not es.map(entryRowHTML): map would hand the index in as a second argument.)
+      (es.length ? es.map(function (e) { return entryRowHTML(e); }).join("") : '<p class="empty">Nothing logged on this day.</p>') +
       "</div>";
   }
 
@@ -4080,6 +4813,63 @@
     }).join("");
     // No preserveAspectRatio="none": that stretched the dots and labels into ovals.
     return '<svg class="spark" viewBox="0 0 ' + w + " " + h + '" width="100%" height="' + h + '" role="img" aria-label="Top set over time"><polyline points="' + line + '"/>' + dots + "</svg>";
+  }
+
+  /* ---------- Line charts (an exercise's sessions, body weight) ---------- */
+
+  // points: oldest first, each { x (0–1, the caller's), v, line (the line's
+  // value when it isn't the dot's: an average), big (a record day), gap (the
+  // stretch arriving here is dotted: a long break), tip (hover text) }.
+  // opts: { scale (TRAINING.chartScale), aria, left, right (words under the
+  // two ends), end (the last value as text, written to the right of the last
+  // point so it can never sit on the line), h }.
+  // No width/height attributes and no preserveAspectRatio: the box scales as
+  // a whole (style.css, .lc svg), so dots stay round and the type matches
+  // the 8-week chart. The axis does not start at zero, so there is no filled
+  // area and no base line. "" for fewer than 2 usable points.
+  function lineChartSVG(points, opts) {
+    var o = opts || {}, sc = o.scale;
+    var pts = (Array.isArray(points) ? points : []).filter(function (p) { return p && isFinite(p.v) && isFinite(p.x); });
+    if (pts.length < 2 || !sc || !(sc.hi > sc.lo)) return "";
+    var W = 300, H = o.h || 146, T = 18, B = H - 22, L = 32;
+    var R = W - (o.end ? 44 : 10), PL = L + 8;
+    var f = function (n) { return n.toFixed(1); };
+    var X = function (p) { return PL + (R - PL) * Math.min(1, Math.max(0, p.x)); };
+    var Y = function (v) { return B - (B - T) * (Math.min(sc.hi, Math.max(sc.lo, v)) - sc.lo) / (sc.hi - sc.lo); };
+    var split = pts.some(function (p) { return isFinite(p.line); });   // the line is an average, not the dots
+    var lv = function (p) { return split && isFinite(p.line) ? p.line : p.v; };
+    var s = "";
+    sc.ticks.forEach(function (t) {
+      s += '<line class="grid" x1="' + L + '" x2="' + (R + 6) + '" y1="' + f(Y(t)) + '" y2="' + f(Y(t)) + '"/>' +
+        '<text class="tick" x="' + (L - 5) + '" y="' + f(Y(t) + 4) + '" text-anchor="end">' + esc(t) + "</text>";
+    });
+    var dot = function (p) {
+      return '<circle class="dot' + (split ? " raw" : (p.big ? " big" : "")) + '" cx="' + f(X(p)) + '" cy="' + f(Y(p.v)) +
+        '" r="' + (split ? 2 : (p.big ? 4 : 2.75)) + '"/>';
+    };
+    // Filled dots last, so a hollow neighbour never covers one.
+    var dots = pts.filter(function (p) { return !p.big; }).map(dot).join("") + pts.filter(function (p) { return p.big; }).map(dot).join("");
+    if (split) s += dots;                 // quiet dots UNDER an average line
+    var run = [];
+    var flush = function () { if (run.length > 1) s += '<polyline class="line" points="' + run.join(" ") + '"/>'; run = []; };
+    pts.forEach(function (p, i) {
+      if (i && p.gap) {
+        var q = pts[i - 1];
+        flush();
+        s += '<line class="line gap" x1="' + f(X(q)) + '" y1="' + f(Y(lv(q))) + '" x2="' + f(X(p)) + '" y2="' + f(Y(lv(p))) + '"/>';
+      }
+      run.push(f(X(p)) + "," + f(Y(lv(p))));
+    });
+    flush();
+    if (!split) s += dots;                // markers ON the line
+    if (o.left) s += '<text class="tick" x="' + L + '" y="' + (B + 16) + '" text-anchor="start">' + esc(o.left) + "</text>";
+    if (o.right) s += '<text class="tick" x="' + (R + 6) + '" y="' + (B + 16) + '" text-anchor="end">' + esc(o.right) + "</text>";
+    var last = pts[pts.length - 1];
+    if (o.end) s += '<text class="vlbl" x="' + f(X(last) + 8) + '" y="' + f(Y(lv(last)) + 4) + '" text-anchor="start">' + esc(o.end) + "</text>";
+    pts.forEach(function (p) {
+      if (p.tip) s += '<circle class="hit" cx="' + f(X(p)) + '" cy="' + f(Y(p.v)) + '" r="6"><title>' + esc(p.tip) + "</title></circle>";
+    });
+    return '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(o.aria || "") + '">' + s + "</svg>";
   }
 
   /* ---------- Settings pane ---------- */
@@ -4111,7 +4901,18 @@
 
   // Two faces: an off state that walks you through the one-off setup, and an on
   // state that just reports and lets you add another device.
-  function syncSectionHTML() {
+  // How full the sync record is: { pct, over } — or null when sync is off or
+  // this device isn't saving. One stringify of the state, so it is worked out
+  // once per Settings render and nowhere else.
+  function syncSpace() {
+    if (typeof SYNC === "undefined" || !syncCfg || readOnly) return null;
+    var u = SYNC.usage(state);
+    return { pct: Math.floor(u.used * 100 / u.max), over: u.used > u.max || syncErrKind === "full" };
+  }
+  var SYNC_FULL_HTML = '<p class="warn"><strong>Sync has stopped: your data is too big for it.</strong> Everything still saves on this device, ' +
+    "but your devices no longer share new workouts with each other. Download a backup now. Milo can&#8217;t make the data smaller yet; that needs a new version.</p>";
+
+  function syncSectionHTML(space) {
     if (typeof SYNC === "undefined") return "";
     var head = "<h4>Sync across your devices</h4>";
     if (!syncCfg) {
@@ -4142,6 +4943,14 @@
       '<button class="btn" id="pairQrBtn">&#9636; Connect another device</button></div>' +
       '<div id="pairbox" class="qrbox"></div>' +
       '<p class="hint">Happens by itself when you open the app and after you log a session.</p>' +
+      // The meter is about sync's limit only (the phone's own storage is
+      // reported by "Saving isn't working"). Calm until it is really full:
+      // 75 % can last most of a year.
+      (space ? '<p class="syncspace">Sync space: <b>' + (space.pct < 1 ? "less than 1%" : space.pct + "%") + " used</b></p>" +
+        '<span class="tb" aria-hidden="true" style="--area:var(--' + (space.pct >= 75 ? "danger" : "accent") + ')"><span class="tb-track"></span>' +
+        '<span class="tb-fill" style="width:' + Math.min(100, Math.max(1, space.pct)) + '%"></span></span>' +
+        (space.over ? SYNC_FULL_HTML : (space.pct >= 75
+          ? '<p class="hint">At 100% sync stops: each device keeps saving everything, but your devices stop sharing new workouts. Nothing to do yet; download a backup now and then.</p>' : "")) : "") +
       olderCopy;
   }
 
@@ -4159,7 +4968,7 @@
   }
 
   function settingsPaneHTML() {
-    var url = shareURL();
+    var url = shareURL(), space = syncSpace();
     var routineChips = '<button class="chip' + (!routineOn() ? " sel" : "") + '" data-routine="off">Off</button>' +
       [2, 3, 6].map(function (d) {
         return '<button class="chip' + (state.routine.split === "bb" + d ? " sel" : "") + '" data-routine="' + d + '">' + d + " days/week</button>";
@@ -4169,7 +4978,8 @@
     var warnings =
       (storageOk ? "" : '<p class="warn"><strong>Saving isn&#8217;t working</strong> in this browser (storage blocked, or full). Changes will be lost when you close the tab — download a backup file now.</p>') +
       (readOnly ? '<p class="warn"><strong>Nothing is being saved on this device</strong>: it holds data from a newer version of the app. Reload to update — until then, changes made here are lost when you close it.</p>' : "") +
-      (loadFailed ? '<p class="warn"><strong>The data on this device couldn&#8217;t be read</strong>, so the app started empty. Nothing has been overwritten yet — restore a backup file before logging anything new.</p>' : "");
+      (loadFailed ? '<p class="warn"><strong>The data on this device couldn&#8217;t be read</strong>, so the app started empty. Nothing has been overwritten yet — restore a backup file before logging anything new.</p>' : "") +
+      (space && space.over ? SYNC_FULL_HTML : "");
 
     return sheetHead({ title: "&#9881;&#65039; Settings", sub: "", back: false }) +
       '<div class="sheet-body settings">' +
@@ -4180,7 +4990,7 @@
       (routineOn() ? '<div class="routine-preview">' + routinePreviewHTML() + "</div>" : "") +
       volTargetsHTML() +
       restSettingsHTML() +
-      syncSectionHTML() +
+      syncSectionHTML(space) +
       ghostSectionHTML() +
       "<h4>Backup</h4>" +
       "<p>A file with everything — your steps and every session you&#8217;ve logged.</p>" +
@@ -4467,11 +5277,16 @@
       if (pg) pg.addEventListener("click", openGymPick);
       var pq = $("#pickQuick", sheet);
       if (pq) pq.addEventListener("click", function () { openQuick(null); });
+      var pw = $("#pickWeigh", sheet);
+      if (pw) pw.addEventListener("click", function () { openWeigh(); });
     }
 
     if (view.t === "group") {
       sheet.querySelectorAll(".librow[data-area]").forEach(function (b) {
         b.addEventListener("click", function () { openArea(Number(b.getAttribute("data-area"))); });
+      });
+      sheet.querySelectorAll(".librow[data-lift]").forEach(function (b) {
+        b.addEventListener("click", function () { pushView({ t: "exercise", x: b.getAttribute("data-lift") }); });
       });
       var gl = $("#groupLogBtn", sheet);
       if (gl) gl.addEventListener("click", function () { openQuick(null, view.x); });
@@ -4482,21 +5297,15 @@
     if (view.t === "exercise") wireExercise(sheet, view.x);
     if (view.t === "exform") wireExForm(sheet);
 
-    if (view.t === "entry") {
-      var de = $("#deleteEntry", sheet);
-      if (de) de.addEventListener("click", function () {
-        if (!confirm("Delete this entry?")) return;
-        deleteLogEntry(view.x);
-        refresh();
-        leaveForm();
-        toast(storageOk && !readOnly ? "Entry deleted" : notSavedMsg());
-      });
-    }
+    if (view.t === "records") wireRecords(sheet);
+    if (view.t === "weigh") wireWeigh(sheet);
+    if (view.t === "weight") wireWeight(sheet);
 
     if (view.t === "whatsnew") {
       var wd = $("#whatsNewDone", sheet);
       if (wd) wd.addEventListener("click", function () {
-        setFlag(WHATSNEW_KEY, "done");
+        newsSeen = true;
+        setFlag(WHATSNEW_KEY, NEWS);
         renderToday();
         closeAll();
       });
@@ -4726,7 +5535,7 @@
   var syncBusy = false;      // a round is in flight
   var syncAgain = false;     // something changed while it was in flight
   var syncErr = "";
-  var syncErrKind = "";      // "newer" | "blocked" | "" — decides what Settings offers
+  var syncErrKind = "";      // "newer" | "blocked" | "full" | "" — decides what Settings offers
   var syncTimer = null;
   var applyingSync = false;  // guards against a sync's own save re-triggering it
 
@@ -4740,7 +5549,7 @@
   function logPaneOpen() {
     var top = uiStack[uiStack.length - 1];
     // Also the quick sheet: a sync must not re-render a form mid-entry.
-    return !!top && /^(log|quick|gym|exform)$/.test(top.t);
+    return !!top && /^(log|quick|gym|exform|weigh)$/.test(top.t);
   }
 
   // Every change goes through saveState(), so that is the only place this needs
@@ -4766,10 +5575,6 @@
       syncBusy = false;
       syncErr = ""; syncErrKind = "";
       SYNC.markSynced(syncCfg, nowMs());
-      if (changed) {
-        refresh();
-        if (uiStack.length && !logPaneOpen()) renderSheet();
-      }
       if (manual) toast(changed ? "Synced — new data pulled in ✓" : "Synced ✓");
       updateSyncUI();
       if (syncAgain && !logPaneOpen()) { syncAgain = false; syncNow(false); }
@@ -4830,6 +5635,10 @@
         applyingSync = false;
         jumpRadar();
         changed = true;
+        // Drawn here, not only after a successful push: a refused or failed
+        // push must not leave the screen behind what is now stored.
+        refresh();
+        if (uiStack.length && !logPaneOpen()) renderSheet();
       }
       // Only remember the old record as merged once its sessions are stored.
       if (legacy && savedOk) SYNC.updateConfig(syncCfg, { legacyAt: legacy.stamp });
@@ -4841,7 +5650,7 @@
       }, function (err) {
         // Another device wrote between our read and our write — take its
         // version into account and try once more.
-        if (err && err.conflict && triesLeft > 0) return syncRound(triesLeft - 1);
+        if (err && err.conflict && triesLeft > 0) return syncRound(triesLeft - 1).then(function (again) { return changed || again; });
         throw err;
       });
     });
@@ -4871,6 +5680,7 @@
     if (!syncCfg) return "";
     if (readOnly) return "Paused: this device has data from a newer version of the app. Reload to update.";
     if (syncBusy) return "Syncing…";
+    if (syncErrKind === "full") return "Sync has stopped: your data is too big for it.";
     if (syncErr) return "Last attempt failed: " + syncErr;
     if (!syncCfg.lastSync) return "Set up — not synced yet.";
     return "Last synced " + agoText(syncCfg.lastSync) + ".";
@@ -4940,6 +5750,7 @@
 
   function refresh() {
     TRAINING.useExercises(state.exercises);
+    gymIdx = null;
     renderCards();
     animateRadar();
     renderSkillNudge();
@@ -4955,7 +5766,7 @@
   });
 
   // "What's new" is for a device that already had data before this version.
-  if (flag(WHATSNEW_KEY) === null) setFlag(WHATSNEW_KEY, untouched() ? "done" : "show");
+  if (flag(WHATSNEW_KEY) === null && untouched()) setFlag(WHATSNEW_KEY, NEWS);
   TRAINING.useExercises(state.exercises);
   resumeRest();
   clearOldRestNotifications();
