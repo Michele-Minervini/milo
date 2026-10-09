@@ -30,6 +30,17 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   counted, its last 8 weeks, its gym exercises and the skills that train it.
   The ⓘ explains the counting. At the top, a **Body weight** card (see
   Weigh-ins below).
+- **Progress, group by group.** Hard sets say how much you did; progress says
+  whether it got harder. Each group's card on Body shows how many of its gym
+  exercises went **up on last time** this week: a heavier top weight, or the
+  same weight with more reps on the same sets (each exercise's latest session
+  this week against its last one before this week; after more than 6 weeks
+  off there is nothing to compare). The group's sheet lists them, shows the
+  **kilos lifted** (kg × reps over the weighted sets — a number to look at,
+  not a target: it can't be compared between exercises, and lighter sets of
+  more reps raise it without being harder) and a **strength line** over 8
+  weeks: the average change of the exercises you repeated, each against
+  itself, starting at 100.
 - **Skills.** The six-axis radar, ten rings deep — your current step in every
   ladder — and a card per ladder with what's next. Tap an area (chart or card)
   for its ten steps; tap a dot to jump straight to your current exercise. Every

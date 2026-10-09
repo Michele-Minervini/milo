@@ -13,8 +13,9 @@
    warm-ups, e1RM, one exercise's history and best set, and the
    double-progression suggestion for its next session. And
    progress: records, each exercise's chart, each muscle group's
-   gym exercises, body weight, and the axis a line chart is drawn
-   on. Data only: the words the app shows are app.js's.
+   gym exercises, whether they got harder this week and the
+   group's strength trend, body weight, and the axis a line chart
+   is drawn on. Data only: the words the app shows are app.js's.
 
    Pure functions over plain values: no DOM, no storage, and no
    clock — whoever needs "this week" passes the time in — so
@@ -53,7 +54,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v25";
+  var BUILD = "milo-v26";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -1541,7 +1542,7 @@ var TRAINING = (function () {
   //     days     its session days, oldest first — a calendar day with at
   //              least one counted set:
   //              { day "YYYY-MM-DD", ts (its latest entry's), n (counted
-  //                sets), top, e1, rec, w, r }
+  //                sets), top, e1, rec, w, r, at, load }
   //                top  the day's top set { kg, reps, id, i }: the hardest
   //                     weight, then the most reps (reps only where weight
   //                     doesn't count)
@@ -1549,6 +1550,8 @@ var TRAINING = (function () {
   //                     { kg, reps, value }, external weight only; else null
   //                rec  the day's record, or null
   //                w, r the two marks as they stood after that day
+  //                at   the reps done at the top weight, most first
+  //                load kg × reps over the sets with weight on
   //     w, r     the marks now: { kg, reps, ts, id, i } or null. w is the
   //              hardest weight (with the most reps done at it), r the most
   //              reps with no weight on.
@@ -1646,11 +1649,23 @@ var TRAINING = (function () {
         out = { exId: ex.id, day: cur.day, ts: rec.set.ts, id: rec.set.id, i: rec.set.i, kg: rec.set.kg, reps: rec.set.reps, by: rec.by };
         records.push(out);
       }
+      // What one session is compared with the next by (see progress()): the
+      // reps done at the day's top weight, most first — every counted set
+      // where weight doesn't count. And the kg lifted that day: kg × reps
+      // over the counted sets with weight on (doubled for a weight logged
+      // per hand); nothing for bodyweight, holds and assisted machines.
+      var at = [], load = 0;
+      sets.forEach(function (s) {
+        if (mode === "reps" || s.kg === top.kg) at.push(s.reps);
+        if (mode === "load" && s.kg > 0) load += s.kg * s.reps;
+      });
+      at.sort(function (a, b) { return b - a; });
+      if (ex.perHand) load *= 2;
       days.push({
         day: cur.day, ts: cur.ts, n: sets.length,
         top: { kg: top.kg, reps: top.reps, id: top.id, i: top.i },
         e1: e1 ? { kg: e1.kg, reps: e1.reps, value: e1.sc / 30 } : null,
-        rec: out, w: w, r: r
+        rec: out, w: w, r: r, at: at, load: load
       });
     };
     list.forEach(function (x) {
@@ -1816,6 +1831,151 @@ var TRAINING = (function () {
           cmpStr(String(xa.name).toLowerCase(), String(xb.name).toLowerCase()) || cmpStr(a.exId, b.exId);
       });
     });
+    return out;
+  }
+
+  /* ---------- Progress: is it getting harder? ---------- */
+
+  // Hard sets say how MUCH was done; this says whether it got HARDER — the
+  // other half of progressive overload. It is judged exercise by exercise,
+  // each against itself, because kilos can't be added up across exercises:
+  // a leg press moves five times a squat's kilos for the same effort, and a
+  // light set of 12 moves more than a heavy set of 6.
+
+  // The strength trend looks back this many weeks unless asked otherwise.
+  var STRENGTH_WEEKS = 8;
+  // One exercise can move a week of the trend by this factor at most, either
+  // way: the first weeks of a new exercise (finding the weight) would
+  // otherwise pass for a leap in strength.
+  var STRENGTH_SWING = 1.25;
+
+  // One session of an exercise against an earlier one: 1 up, 0 the same,
+  // −1 down — as the double progression works towards it (suggest()):
+  //   a harder top weight (heavier; less help on an assisted machine) is up
+  //   the same top weight: the reps done at it, set against set from the
+  //     best down, over as many sets as both sessions have — more is up
+  //   bodyweight only and holds: the reps (seconds) the same way
+  // A set more or fewer changes nothing by itself: that is dose, and the
+  // hard-set bars show it.
+  function compareDays(ex, a, b) {
+    var mode = weightMode(ex);
+    if (mode !== "reps" && a.top.kg !== b.top.kg) {
+      return (mode === "assist" ? a.top.kg < b.top.kg : a.top.kg > b.top.kg) ? 1 : -1;
+    }
+    var k = Math.min(a.at.length, b.at.length), sa = 0, sb = 0;
+    for (var i = 0; i < k; i++) { sa += a.at[i]; sb += b.at[i]; }
+    return sa > sb ? 1 : (sa < sb ? -1 : 0);
+  }
+
+  // This week, muscle group by muscle group: which of its gym exercises got
+  // harder. For the week containing now, Monday up to the end of today:
+  //   { group: { up, same, down, fresh, kg, kgBefore, list } }
+  //   list      one row per exercise of the group (its own group, not the
+  //             ones it only helps) trained this week, in the order trained:
+  //             { exId, status, ts, day, kg, reps, prev }
+  //               status  "up" | "same" | "down" (compareDays): its latest
+  //                       session this week against its last session BEFORE
+  //                       this week — or "new" when there is none, "back"
+  //                       when that was more than RETURN_DAYS days earlier
+  //                       (after a break lighter is the plan, not a step back)
+  //               kg, reps  the top weight of this week's session and the
+  //                       reps done at it, most first
+  //               prev    { ts, kg, reps } of the session it is set against
+  //   up, same, down      how many rows have each status
+  //   fresh     the rows with nothing to compare ("new" and "back")
+  //   kg        the kilos lifted this week so far: kg × reps over the counted
+  //             sets with weight on of those exercises (a weight logged per
+  //             hand counts twice; added weight counts as the kg added;
+  //             bodyweight, holds and assisted machines add nothing)
+  //   kgBefore  the same for the whole week before
+  // Days after today are left out. All six groups, always.
+  function progress(x, now) {
+    var out = {};
+    GROUPS.forEach(function (g) { out[g] = { up: 0, same: 0, down: 0, fresh: 0, kg: 0, kgBefore: 0, list: [] }; });
+    if (!validTime(now)) return out;
+    var idx = asIndex(x), t = Number(now), from = weekStart(t), to = nextDay(t), before = addWeeks(from, -1);
+    Object.keys(idx.byEx).forEach(function (exId) {
+      var ex = exRec(exId);
+      if (!ex || !isGroup(ex.p)) return;
+      var days = idx.byEx[exId].days, g = out[ex.p], cur = null, prev = null;
+      for (var k = days.length - 1; k >= 0; k--) {
+        var d = days[k];
+        if (d.ts >= to) continue;
+        if (d.ts >= from) { if (!cur) cur = d; g.kg += d.load; continue; }
+        if (!prev) prev = d;
+        if (d.ts < before) break;
+        g.kgBefore += d.load;
+      }
+      if (!cur) return;
+      var status = "new";
+      if (prev) {
+        var c = dayDelta(prev.ts, cur.ts) > RETURN_DAYS ? null : compareDays(ex, cur, prev);
+        status = c === null ? "back" : (c > 0 ? "up" : (c < 0 ? "down" : "same"));
+      }
+      g[status === "new" || status === "back" ? "fresh" : status]++;
+      g.list.push({
+        exId: exId, status: status, ts: cur.ts, day: cur.day, kg: cur.top.kg, reps: cur.at.slice(),
+        prev: prev ? { ts: prev.ts, kg: prev.top.kg, reps: prev.at.slice() } : null
+      });
+    });
+    GROUPS.forEach(function (g) {
+      out[g].list.sort(function (a, b) { return (a.ts - b.ts) || cmpStr(a.exId, b.exId); });
+    });
+    return out;
+  }
+
+  // A session as one number, to set against another session of the SAME
+  // exercise: the best estimated 1-rep max for an external weight, the most
+  // reps (seconds) where weight doesn't count, and for added weight or an
+  // assisted machine the reps at the top weight — comparable only with a
+  // session at that same weight (`k` says what the number is).
+  function dayValue(ex, d) {
+    if (weightMode(ex) === "reps") return { k: "r", v: d.top.reps };
+    if (d.e1) return { k: "e", v: d.e1.value };
+    return { k: "w" + d.top.kg, v: d.top.reps };
+  }
+
+  // A muscle group's strength over the last `weeks` weeks (STRENGTH_WEEKS
+  // unless given; this week last, up to the end of today):
+  //   [{ start, n, change, index }]   one per week, oldest first
+  //   n       the group's exercises that week with something to compare:
+  //           a session that week, and one before that week no more than
+  //           RETURN_DAYS days earlier, measured the same way (dayValue)
+  //   change  the average of their changes against that earlier session
+  //           (0.02 = 2 % up), each exercise against itself and held within
+  //           STRENGTH_SWING; null when n is 0
+  //   index   100 before the first week, moved by every week's change: 104
+  //           is 4 % up over the weeks shown. A week with nothing to
+  //           compare leaves it where it was.
+  // An average of percentages, not of kilos: that is what lets a squat, a
+  // leg press and a set of push-ups share one line. [] for a group that
+  // isn't one or a time that isn't one.
+  function strength(x, group, now, weeks) {
+    var out = [];
+    if (!isGroup(group) || !validTime(now)) return out;
+    var n = (weeks === null || weeks === undefined) ? STRENGTH_WEEKS : Math.round(Number(weeks));
+    if (!(n >= 1)) n = STRENGTH_WEEKS;
+    n = Math.min(MAX_HISTORY_WEEKS, n);
+    var idx = asIndex(x), t = Number(now), cur = weekStart(t), end = nextDay(t), level = 100;
+    var ids = Object.keys(idx.byEx).filter(function (id) { var ex = exRec(id); return !!ex && ex.p === group; });
+    for (var i = n - 1; i >= 0; i--) {
+      var from = addWeeks(cur, -i), to = Math.min(addWeeks(from, 1), end), sum = 0, k = 0;
+      ids.forEach(function (id) {
+        var ex = exRec(id), days = idx.byEx[id].days, a = null, b = null;
+        for (var j = days.length - 1; j >= 0 && !b; j--) {
+          if (days[j].ts >= to) continue;
+          if (days[j].ts >= from) { if (!a) a = days[j]; } else b = days[j];
+        }
+        if (!a || !b || dayDelta(b.ts, a.ts) > RETURN_DAYS) return;
+        var va = dayValue(ex, a), vb = dayValue(ex, b);
+        if (va.k !== vb.k || !(va.v > 0) || !(vb.v > 0)) return;
+        sum += Math.max(1 / STRENGTH_SWING, Math.min(STRENGTH_SWING, va.v / vb.v));
+        k++;
+      });
+      var change = k ? sum / k - 1 : null;
+      if (k) level *= 1 + change;
+      out.push({ start: from, n: k, change: change, index: level });
+    }
     return out;
   }
 
@@ -2080,6 +2240,8 @@ var TRAINING = (function () {
     standing: standing,
     trend: trend,
     lifts: lifts,
+    progress: progress,
+    strength: strength,
     bodyWeight: bodyWeight,
     chartScale: chartScale,
     lastTrainedAll: lastTrainedAll,
@@ -2088,6 +2250,8 @@ var TRAINING = (function () {
     TREND_SESSIONS: TREND_SESSIONS,
     E1RM_MAX_HI: E1RM_MAX_HI,
     TIMED_STEP: TIMED_STEP,
+    STRENGTH_WEEKS: STRENGTH_WEEKS,
+    STRENGTH_SWING: STRENGTH_SWING,
     LOADS: LOADS,
     HELPER_WEIGHT: HELPER_WEIGHT,
     WARMUP_SHARE: WARMUP_SHARE,

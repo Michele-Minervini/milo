@@ -254,6 +254,79 @@ section("each muscle group's gym exercises, the main one first");
   eq("a time that isn't one: six empty lists", T.lifts(log, "soon"), { chest: [], back: [], shoulders: [], arms: [], abs: [], legs: [] });
 }
 
+section("progress this week: which exercises got harder");
+{
+  const now = L(2026, 10, 8, 20);      // a Thursday; the week began Monday 5 October
+  const O = (d, hh) => L(2026, 10, d, hh || 12);
+  const st = (log, g, t) => T.progress(log, t || now)[g || "chest"].list.map(x => x.exId + " " + x.status);
+  const one = (before, after) => st([G(S(29), "bench_db", before[0], before[1]), G(O(6), "bench_db", after[0], after[1])])[0].split(" ")[1];
+  eq("a heavier top weight is up, whatever the reps", one([[12, 12, 12], 16], [[7, 6, 6], 18]), "up");
+  eq("the same weight with more reps on the same sets is up", one([[8, 8, 7], 20], [[9, 8, 8], 20]), "up");
+  eq("…the same reps is the same", one([[8, 8, 7], 20], [[8, 7, 8], 20]), "same");
+  eq("…fewer is down", one([[10, 10, 9], 16], [[10, 9, 9], 16]), "down");
+  eq("a lighter top weight is down, even for more reps", one([[8, 8, 8], 20], [[12, 12, 12], 18]), "down");
+  eq("one set fewer changes nothing by itself: set against set from the best down", [one([[8, 8, 7], 20], [[8, 8], 20]), one([[8, 8, 7], 20], [[9, 9], 20]), one([[8, 8], 20], [[8, 8, 8], 20])], ["same", "up", "same"]);
+  eq("a pyramid goes by its top set: the build-up sets don't matter", st([pyr(S(28), 43.25, 5), pyr(O(5), 45.75, 5)], "legs"), ["squat_bb up"]);
+  eq("…and by the reps at the top when the weight is the same", st([pyr(S(28), 43.25, 5), pyr(O(5), 43.25, 6)], "legs"), ["squat_bb up"]);
+  eq("warm-ups never count: a heavy set marked W is not the top weight", st([G(S(28), "squat_bb", [5], 40, { warm: [0] }), G(O(5), "squat_bb", [1, 5], [60, 40], { warm: [1, 0] })], "legs"), ["squat_bb same"]);
+  eq("push-ups and planks go by reps and seconds", [st([G(S(30), "pushup_std", [15, 12], 0), G(O(7), "pushup_std", [16, 12], 0)]), st([G(S(30), "plank", [40, 35], 0), G(O(7), "plank", [40, 30], 0)], "abs")],
+    [["pushup_std up"], ["plank down"]]);
+  eq("added weight: weight first, then reps; bodyweight after weighted is down", [st([G(S(30), "pullup_std", [8], 0), G(O(7), "pullup_std", [5], 2.5)], "back"),
+    st([G(S(30), "pullup_std", [5], 2.5), G(O(7), "pullup_std", [12], 0)], "back")], [["pullup_std up"], ["pullup_std down"]]);
+  eq("an assisted machine: less help is up", st([G(S(30), "pullup_assist", [8], 30), G(O(7), "pullup_assist", [6], 25)], "back"), ["pullup_assist up"]);
+
+  const log = [
+    G(S(29), "bench_db", [8, 8, 7], 20), G(O(6), "bench_db", [9, 8, 8], 20),
+    G(S(29, 13), "incline_db", [10, 10, 9], 16), G(O(6, 13), "incline_db", [10, 9, 9], 16),
+    G(S(30), "pushup_std", [15, 12], 0), G(O(7), "pushup_std", [15, 12], 0),
+    G(O(7, 13), "fly_cable", [12, 12], 10),
+    G(L(2026, 7, 1), "chest_press", [10], 40), G(O(7, 15), "chest_press", [10], 35),
+    G(S(28), "squat_bb", [15, 12, 9, 5], [9, 22.5, 31.5, 43.25], { warm: [0, 0, 0, 0] })
+  ];
+  const p = T.progress(log, now);
+  eq("a week of chest: one up, one same, one down, a new exercise and one back after a long break", st(log), ["bench_db up", "incline_db down", "pushup_std same", "fly_cable new", "chest_press back"]);
+  eq("…counted", [p.chest.up, p.chest.same, p.chest.down, p.chest.fresh], [1, 1, 1, 2]);
+  eq("…each row carries this week's top sets and the session it is set against",
+    [p.chest.list[0].kg, p.chest.list[0].reps, p.chest.list[0].prev, p.chest.list[3].prev], [20, [9, 8, 8], { ts: S(29), kg: 20, reps: [8, 8, 7] }, null]);
+  eq("kilos lifted: kg × reps over the weighted sets, a weight per hand twice; push-ups add nothing",
+    [p.chest.kg, p.chest.kgBefore], [20 * 25 * 2 + 16 * 28 * 2 + 10 * 24 + 35 * 10, 20 * 23 * 2 + 16 * 29 * 2]);
+  eq("legs: nothing this week, so nothing to list — but last week's kilos are there", [p.legs.list, p.legs.kg, p.legs.kgBefore], [[], 0, 9 * 15 + 22.5 * 12 + 31.5 * 9 + 43.25 * 5]);
+  eq("all six groups, always", Object.keys(p), M.GROUPS);
+  eq("it is this week against before this week: a second session this week is the one that counts",
+    st([G(S(29), "bench_db", [8], 20), G(O(5), "bench_db", [10], 20), G(O(7), "bench_db", [9], 20)]), ["bench_db up"]);
+  eq("…and a session later than today is left out", st([G(S(29), "bench_db", [8], 20), G(O(6), "bench_db", [9], 20), G(O(9), "bench_db", [5], 20)]), ["bench_db up"]);
+  eq("last Sunday 23:30 is last week, Monday 00:30 this week", [st([G(L(2026, 10, 4, 23, 30), "bench_db", [8], 20)]), st([G(S(29), "bench_db", [8], 20), G(L(2026, 10, 5, 0, 30), "bench_db", [9], 20)])], [[], ["bench_db up"]]);
+  eq("42 days back is still compared, 43 is a break", [st([G(M.addDays(M.startOfDay(O(6)), -42).getTime() + 3600000, "bench_db", [8], 30), G(O(6), "bench_db", [8], 20)]),
+    st([G(M.addDays(M.startOfDay(O(6)), -43).getTime() + 3600000, "bench_db", [8], 30), G(O(6), "bench_db", [8], 20)])], [["bench_db down"], ["bench_db back"]]);
+  eq("an exercise nobody knows, or a time that isn't one: nothing", [T.progress([G(O(6), "gone_ex", [8], 20)], now).chest.list, T.progress(log, "soon").chest], [[], { up: 0, same: 0, down: 0, fresh: 0, kg: 0, kgBefore: 0, list: [] }]);
+  check("the same log in any order gives the same answer", J(T.progress(log, now)) === J(T.progress(shuffled(log), now)) && J(T.progress(T.gymIndex(log), now)) === J(p));
+}
+
+section("a muscle group's strength over the weeks");
+{
+  const now = L(2026, 10, 8, 20);
+  const wk = k => M.addDays(new Date(T.weekStart(now)), -7 * k).getTime() + 36 * 3600000;      // Tuesday noon, k weeks back
+  // Bench 40 kg × 8, 9, 10 over three weeks, then 42.5 × 8: the estimate goes 50.67, 52, 53.33, 53.83.
+  const bench = [G(wk(3), "bench_bb", [8], 40), G(wk(2), "bench_bb", [9], 40), G(wk(1), "bench_bb", [10], 40), G(wk(0), "bench_bb", [8], 42.5)];
+  const s4 = T.strength(bench, "chest", now, 4);
+  eq("one row a week, oldest first, this week last", [s4.length, s4.map(w => w.start), s4.map(w => w.n)], [4, [3, 2, 1, 0].map(k => T.addWeeks(now, -k)), [0, 1, 1, 1]]);
+  eq("each week is the change against the session before that week", s4.map(w => w.change === null ? null : Math.round(w.change * 10000) / 100), [null, 2.63, 2.56, 0.94]);
+  eq("…and the index starts at 100 and carries them forward", s4.map(w => Math.round(w.index * 100) / 100), [100, 102.63, 105.26, 106.25]);
+  const push = [G(wk(2), "pushup_std", [10], 0), G(wk(1), "pushup_std", [11], 0), G(wk(0), "pushup_std", [11], 0)];
+  eq("bodyweight exercises count by reps", T.strength(push, "chest", now, 3).map(w => w.change === null ? null : Math.round(w.change * 1000) / 10), [null, 10, 0]);
+  eq("the group's week is the average of its exercises, each against itself (bench +0.94 %, push-ups 0 %)",
+    Math.round(T.strength(bench.concat(push), "chest", now, 1)[0].change * 10000) / 100, 0.47);
+  eq("one exercise can't move a week by more than a quarter (a first weeks' jump from 20 to 40 kg)",
+    T.strength([G(wk(1), "bench_bb", [8], 20), G(wk(0), "bench_bb", [8], 40)], "chest", now, 1)[0].change, 0.25);
+  eq("…nor pull it down by more than a fifth", Math.round(T.strength([G(wk(1), "bench_bb", [8], 40), G(wk(0), "bench_bb", [8], 20)], "chest", now, 1)[0].change * 100) / 100, -0.2);
+  eq("added weight is only compared at the same weight: a week that changes it has nothing to measure",
+    [T.strength([G(wk(1), "pullup_std", [6], 2.5), G(wk(0), "pullup_std", [8], 2.5)], "back", now, 1)[0].n, T.strength([G(wk(1), "pullup_std", [8], 0), G(wk(0), "pullup_std", [5], 2.5)], "back", now, 1)[0]],
+    [1, { start: T.weekStart(now), n: 0, change: null, index: 100 }]);
+  eq("after a break of more than 6 weeks there is nothing to compare", T.strength([G(wk(8), "bench_bb", [8], 40), G(wk(0), "bench_bb", [8], 30)], "chest", now, 1)[0].n, 0);
+  eq("8 weeks unless asked; a group or a time that isn't one: nothing", [T.strength(bench, "chest", now).length, T.strength(bench, "glutes", now), T.strength(bench, "chest", NaN)], [8, [], []]);
+  check("the same log in any order gives the same line", J(T.strength(bench.concat(push), "chest", now)) === J(T.strength(shuffled(bench.concat(push)), "chest", now)));
+}
+
 section("body weight: one value a day, everything hung on the latest weigh-in");
 {
   const now = L(2026, 10, 8, 9);
@@ -401,7 +474,8 @@ section("odd logs, odd times and odd names never break anything");
       try {
         const idx = T.gymIndex(log);
         T.records(log); T.records(idx); T.recordsIn(log, t); T.recordsIn(idx, t, t); T.lifts(log, t); T.lifts(idx, t); T.bodyWeight(log, t);
-        ids.forEach(id => { T.trend(log, id); T.trend(idx, id, t); T.standing(log, id); T.standing(idx, id, t); T.recordFloor(id); });
+        ids.forEach(id => { T.trend(log, id); T.trend(idx, id, t); T.standing(log, id); T.standing(idx, id, t); T.recordFloor(id); T.strength(log, id, t); T.strength(idx, "legs", t, id); });
+        T.progress(log, t); T.progress(idx, t);
         T.chartScale(t, log, id => id);
       } catch (e) { threw.push("log " + i + ", now " + String(t) + ": " + e.message); }
     }));
@@ -431,7 +505,7 @@ section("a big log stays quick");
   }
   let t0 = Date.now();
   const idx = T.gymIndex(big);
-  T.records(idx); T.recordsIn(idx, now); T.lifts(idx, now); T.bodyWeight(big, now);
+  T.records(idx); T.recordsIn(idx, now); T.lifts(idx, now); T.bodyWeight(big, now); T.progress(idx, now); M.GROUPS.forEach(g => T.strength(idx, g, now));
   exs.forEach(id => { T.trend(idx, id); T.standing(idx, id); });
   let ms = Date.now() - t0;
   check("3,000 entries: the index, every chart, the lifts and body weight in well under a quarter of a second", ms < 250, "took " + ms + " ms");

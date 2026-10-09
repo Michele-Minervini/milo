@@ -24,7 +24,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v25";
+  var BUILD = "milo-v26";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -1222,7 +1222,7 @@
                       once. A device with nothing on it at its first launch
                       is given NEWS straight away and never sees it.
        milo.come      "done" once "Coming from another device?" is answered. */
-  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "p5";
+  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v26";
   // Dismissed in this page view: holds even where the flag can't be stored.
   var newsSeen = false;
   function flag(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
@@ -1346,7 +1346,7 @@
   function whatsNewLineHTML() {
     return '<div class="today-card wnline">' +
       '<button class="wn-open" id="whatsNewBtn" type="button">' + ico("&#10024;") +
-      '<span class="wn-text"><b>Records, charts and weigh-ins.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<span class="wn-text"><b>Progress, group by group.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
       '<button class="nc-x" id="whatsNewX" type="button" aria-label="Hide what&#8217;s new">&#10005;</button></div>';
   }
 
@@ -1525,8 +1525,17 @@
 
   // last: when each group was last trained; lifts: each group's gym exercises
   // (both worked out once per render, not once per card).
-  function bodyRowHTML(g, ws, before, last, lifts) {
-    var r = ws.by[g], lift = lifts[g][0];
+  // "3 of 4 exercises up on last time", with a ✓ once at least half are: the
+  // gym exercises of a group this week that got harder (TRAINING.progress).
+  // "" while there is nothing to compare.
+  function progressLineHTML(p) {
+    var n = p.up + p.same + p.down;
+    if (!n) return "";
+    return (p.up * 2 >= n ? "&#10003; " : "") + "<b>" + p.up + " of " + n + "</b> " + (n === 1 ? "exercise" : "exercises") + " up on last time";
+  }
+
+  function bodyRowHTML(g, ws, before, last, lifts, prog) {
+    var r = ws.by[g], lift = lifts[g][0], p = prog[g], pl = progressLineHTML(p);
     last = last[g];
     var feed = (lift && liftLine(lift, last)) || feedLine(g);
     return '<button class="card grow st-' + r.standing + " z-" + r.zone + '" type="button" data-group="' + g + '" style="--area:' + groupColorVar(g) + '">' +
@@ -1536,7 +1545,8 @@
       tbar(r.sets, r.lo, r.hi, r.pace) +
       '<span class="gr-status"><span class="gr-zone">' + zoneText(r) + '</span><span class="gr-delta">' + deltaText(r.sets, before[g] || 0) + "</span></span>" +
       '<span class="gr-meta">' + (last ? "Last trained " + agoPhrase(last) : (r.sets > 0 ? "No day with a full hard set yet" : "Not trained yet")) +
-      (feed ? " &middot; " + feed : "") + "</span></button>";
+      (feed ? " &middot; " + feed : "") + "</span>" +
+      (pl ? '<span class="gr-prog' + (p.up * 2 >= p.up + p.same + p.down ? " ok" : "") + '">' + pl + "</span>" : "") + "</button>";
   }
 
   function bodyEmptyHTML() {
@@ -1568,9 +1578,9 @@
       if (balance) balance.hidden = true;
     } else {
       var before = TRAINING.lastWeekToDate(state.log, now);
-      var last = TRAINING.lastTrainedAll(state.log, now), lifts = TRAINING.lifts(gym(), now);
+      var last = TRAINING.lastTrainedAll(state.log, now), lifts = TRAINING.lifts(gym(), now), prog = TRAINING.progress(gym(), now);
       top.innerHTML = bwCardHTML(bw) + head + verdictHTML(ws) +
-        '<div class="grows">' + MODEL.GROUPS.map(function (g) { return bodyRowHTML(g, ws, before, last, lifts); }).join("") + "</div>" + TB_LEGEND;
+        '<div class="grows">' + MODEL.GROUPS.map(function (g) { return bodyRowHTML(g, ws, before, last, lifts, prog); }).join("") + "</div>" + TB_LEGEND;
       if (balance) balance.hidden = false;
       paintBodyRadar(ws, before, now);
     }
@@ -1683,6 +1693,85 @@
     return '<svg viewBox="0 0 ' + W + ' 146" role="img" aria-label="' + esc(aria) + '">' + s + "</svg>";
   }
 
+  // "4,320": a whole number with thousands apart.
+  function fmtInt(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  // A session's top sets as text: "9, 8, 8 × 20 kg", "15, 12 reps", "45, 40 sec".
+  function bandText(ex, kg, reps) { return setsText(ex, reps, reps.map(function () { return kg; })); }
+  // "+4%", "−1.5%", "0%": a change in per cent — one decimal under 10.
+  function pctText(x) {
+    var a = Math.abs(x) < 9.95 ? Math.round(x * 10) / 10 : Math.round(x);
+    return a === 0 ? "0%" : (a < 0 ? "−" : "+") + Math.abs(a) + "%";
+  }
+  var PROG_TAG = {
+    up: '<span aria-hidden="true">&#9650; </span>up', same: '<span aria-hidden="true">= </span>same',
+    down: '<span aria-hidden="true">&#9660; </span>down', "new": "new", back: "back"
+  };
+
+  // A group's sheet, "Progress this week": hard sets say how much was done,
+  // this says whether it got harder — each gym exercise of the week against
+  // its own last session before this week (TRAINING.progress), the kilos
+  // lifted as a plain number, and the group's strength over 8 weeks.
+  function groupProgressHTML(g, now) {
+    var p = TRAINING.progress(gym(), now)[g], name = groupName(g).toLowerCase();
+    if (!p.list.length) {
+      return '<p class="empty-line">No gym exercise for ' + esc(name) + " yet this week. Skill sessions and quick gym logs count on the bar above, " +
+        "but only a gym exercise can be set against its last time.</p>";
+    }
+    var line = progressLineHTML(p);
+    var rows = p.list.map(function (it) {
+      var ex = TRAINING.exercise(it.exId);
+      var versus = it.status === "new" ? "first time logged"
+        : (it.status === "back" ? "last time " + dayYear(it.prev.ts) + ", more than 6 weeks before"
+          // At the same weight the reps alone say it; else the whole set.
+          : "last time, " + dayYear(it.prev.ts) + ": " + (it.prev.kg === it.kg ? it.prev.reps.join(", ") : bandText(ex, it.prev.kg, it.prev.reps)));
+      return '<button class="librow exrow" type="button" data-lift="' + esc(it.exId) + '" style="--area:' + exColor(ex) + '">' +
+        '<span class="libinfo"><span class="libname">' + esc(ex.name) + ' <span class="pg-tag ' + it.status + '">' + PROG_TAG[it.status] + "</span></span>" +
+        '<span class="libsub">' + esc(bandText(ex, it.kg, it.reps) + " · " + versus) + "</span></span>" +
+        '<span class="chev" aria-hidden="true">&#8250;</span></button>';
+    }).join("");
+    var kilos = (p.kg > 0 || p.kgBefore > 0)
+      ? '<div class="stdtable pg-kg"><div class="stdrow"><span class="lb">Kilos lifted</span><strong>' + esc(fmtInt(p.kg)) + " kg so far &middot; " +
+        esc(fmtInt(p.kgBefore)) + " kg last week</strong></div></div>" +
+        '<p class="hint">kg &times; reps over the counted sets with weight on. A number to look at, not one to chase: lighter sets of more reps raise it without being harder, ' +
+        "and it says nothing between two different exercises.</p>"
+      : "";
+    return (line ? '<p class="pg-sum' + (p.up * 2 >= p.up + p.same + p.down ? " ok" : "") + '">' + line +
+        (p.fresh ? " &middot; " + p.fresh + " with nothing to compare yet" : "") + ".</p>"
+        : '<p class="pg-sum">Nothing to compare yet: next week these are set against this one.</p>') +
+      '<div class="librows">' + rows + "</div>" + kilos;
+  }
+
+  // The strength line of a group: 100 before the first week shown, moved by
+  // each week's average change of the exercises repeated (TRAINING.strength).
+  function groupStrengthHTML(g, now) {
+    var all = TRAINING.strength(gym(), g, now), first = -1;
+    all.forEach(function (w, i) { if (first === -1 && w.n > 0) first = i; });
+    var weeks = first === -1 ? [] : all.slice(first);
+    if (weeks.filter(function (w) { return w.n > 0; }).length < 2) {
+      return '<p class="empty-line">The line starts once two weeks each have a gym exercise repeated from before.</p>';
+    }
+    // The first point is the 100 everything is measured from: the Monday
+    // the first of these weeks began.
+    var lo = 100, hi = 100;
+    var points = [{ x: 0, v: 100, tip: "Where these weeks start: 100" }].concat(weeks.map(function (w, i) {
+      lo = Math.min(lo, w.index); hi = Math.max(hi, w.index);
+      var d = new Date(w.start);
+      return {
+        x: (i + 1) / weeks.length, v: w.index,
+        tip: "Week of " + d.getDate() + " " + MON_SHORT[d.getMonth()] + ": " + (w.n ? pctText(w.change * 100) + " (" + w.n + (w.n === 1 ? " exercise)" : " exercises)") : "nothing to compare")
+      };
+    }));
+    var total = weeks[weeks.length - 1].index - 100, d0 = new Date(weeks[0].start);
+    var words = (Math.abs(total) < 0.05 ? "Level" : (total > 0 ? "Up " : "Down ") + pctText(Math.abs(total)).slice(1)) + " over these " + weeks.length + " weeks.";
+    return '<div class="lc">' + lineChartSVG(points, {
+      scale: TRAINING.chartScale(lo, hi, 10),
+      left: d0.getDate() + " " + MON_SHORT[d0.getMonth()], right: "this week", end: pctText(total),
+      aria: "Strength for " + groupName(g) + " over the last " + weeks.length + " weeks, starting from 100. " + words
+    }) + "</div>" +
+      '<p class="lc-cap">' + esc(words) + " The average of the exercises you repeated, each against its own last session: estimated 1-rep max for weights, reps for the rest. " +
+      "It starts at 100, and can dip in a week you go up in weight.</p>";
+  }
+
   function groupPaneHTML(g) {
     var now = nowMs(), ws = weekState(now), r = ws.by[g], info = GROUP_INFO[g];
     var before = TRAINING.lastWeekToDate(state.log, now);
@@ -1739,7 +1828,9 @@
       tbar(r.sets, r.lo, r.hi, r.pace) +
       '<span class="rxgoal st-' + r.standing + '">' + goal + "</span></div>" +
       "<h4>What counted this week</h4>" + table +
-      "<h4>Last 8 weeks</h4>" + chart +
+      "<h4>Progress this week</h4>" + groupProgressHTML(g, now) +
+      "<h4>Hard sets, last 8 weeks</h4>" + chart +
+      "<h4>Strength, last 8 weeks</h4>" + groupStrengthHTML(g, now) +
       (liftRows ? "<h4>Gym exercises, last 8 weeks</h4>" + '<div class="librows">' + liftRows + "</div>" : "") +
       "<h4>Skills that train it</h4>" + '<div class="librows">' + feeds + "</div>" +
       "</div>" +
@@ -1773,6 +1864,12 @@
       "<h4>Helpers count half</h4>" +
       "<p>Most exercises work one main group and get help from others. The main group gets the whole set, each helper gets &frac12;. One set of push-ups is 1 for chest, &frac12; for arms and &frac12; for shoulders.</p>" +
       "<p>A quick gym log has only the main groups, so helpers get a smaller share: &frac14; per set. Four chest sets also add 1 to arms and 1 to shoulders.</p>" +
+      "<h4>Progress</h4>" +
+      "<p>Hard sets say how much you did. <b>Progress</b> says whether it got harder. For each gym exercise of the week, Milo sets its latest session against the last one before this week: " +
+      "<b>up</b> is a heavier top weight, or the same weight with more reps on the same sets; fewer is <b>down</b>. One set more or less changes nothing here. " +
+      "A group is doing well when at least half of its exercises are up; nobody is up every week.</p>" +
+      "<p>The <b>kilos lifted</b> (kg &times; reps) are shown in each group&#8217;s sheet as a number to look at, not a target: a light set of 12 moves more kilos than a heavy set of 6, " +
+      "and a leg press moves several times a squat&#8217;s. That is why progress is judged exercise by exercise.</p>" +
       "<h4>Weekly targets</h4>" +
       "<p>10&#8211;20 hard sets a week is a range most people grow well in. Arms and legs are several muscles each, so their range is doubled.</p>" +
       '<div class="stdtable">' + targetRows + "</div>" +
@@ -2763,6 +2860,8 @@
   function whatsNewPaneHTML() {
     return sheetHead({ title: ico("&#10024;") + "What&#8217;s new in Milo", sub: "Once, after this update" }) +
       '<div class="sheet-body volinfo whatsnew">' +
+      "<h4>Progress, muscle group by muscle group</h4><p>The bars count how much you did. Now <b>Body</b> also says whether it got harder: each group&#8217;s card shows how many of its gym exercises " +
+      "went <b>up on last time</b> (a heavier top weight, or more reps at the same weight). Open a group for the list, the kilos lifted and its strength over 8 weeks.</p>" +
       "<h4>Records</h4><p>When a set beats everything you did before in that exercise, Milo tells you as you tick it, marks it in History with a " + ico(TROPHY) +
       '<span class="visually-hidden">trophy</span>' +
       " and keeps the list under <b>History</b>. With weights, a record is a heavier weight than ever, in a proper set. Warm-ups never count, and the first day of an exercise only sets the mark to beat.</p>" +

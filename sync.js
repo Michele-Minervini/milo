@@ -33,7 +33,7 @@ var SYNC = (function () {
   // code must never travel inside a backup file or a shared progress link.
   var CONFIG_KEY = "bigsix.sync";
   var TIMEOUT_MS = 15000;
-  var BUILD = "milo-v25";
+  var BUILD = "milo-v26";
 
   // The cloud record since data v5, next to the old one at plain <code>. The
   // name stays across data versions (v6 writes it too): a device still on an

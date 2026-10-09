@@ -2090,3 +2090,14 @@ p.lc-cap { margin: 6px 2px 0; font-size: 0.8rem; color: var(--muted); line-heigh
 .lg-avg { width: 16px; border-top: 2px solid var(--ink-2); border-top-color: color-mix(in srgb, var(--area, var(--accent)) 70%, var(--ink)); }
 .lg-gap { width: 16px; border-top: 2px dotted var(--ink-2); border-top-color: color-mix(in srgb, var(--area, var(--accent)) 70%, var(--ink)); }
 .sheet-body.history > .chips { margin-bottom: 14px; }
+
+/* ---------- Progress, group by group ---------- */
+.gr-prog { font-size: 0.76rem; color: var(--ink-2); line-height: 1.4; }
+.gr-prog b { color: var(--ink); font-weight: 750; }
+.gr-prog.ok, .gr-prog.ok b { color: var(--good); }
+.groupsheet p.pg-sum { margin: 2px 2px 8px; font-size: 0.88rem; font-weight: 650; color: var(--ink-2); }
+.groupsheet p.pg-sum.ok, .groupsheet p.pg-sum.ok b { color: var(--good); }
+.pg-tag { margin-left: 6px; font-size: 0.72rem; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.pg-tag.up { color: var(--good); }
+.pg-tag.down { color: var(--ink-2); }
+.groupsheet .pg-kg { margin-top: 10px; }
