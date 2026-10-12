@@ -16,10 +16,25 @@ abs and legs.
 
 Four tabs along the bottom, with **＋ Log** in the middle of them:
 
-- **Today.** Today's session (from your weekly routine), one tip about the
-  muscle group that needs it most, and the week at a glance: which days you
-  trained (a dot per muscle group) and six bars of hard sets per group against
-  their weekly targets.
+- **Today.** Today's plan (from your weekly plan: a gym split or a skills
+  routine), one tip about the muscle group that needs it most, and the week
+  at a glance: which days you trained (a dot per muscle group) and six bars of
+  hard sets per group against their weekly targets.
+- **A weekly plan for the gym.** In Settings → Weekly plan, pick a split:
+  **5 days** (legs · back + shoulders · chest · arms · abs), **6 days** (the
+  same with back and shoulders on days of their own) or **Push / Pull / Legs**
+  (each twice a week). Today then shows the day you are on, its exercises —
+  each with its sets, its rep range and the weight to use — and about how
+  long it takes. Nothing about the plan is stored except the split's name:
+  Milo works out which day each training date was from what you logged, so
+  the next day is simply the one after the last you trained (skip a day or
+  train out of order and it carries on from there), and each day lists what
+  you did the last two times you trained it, so changing an exercise changes
+  the plan. Before a day has a history it starts from a short list.
+  **Different day** picks another day for today; **＋ Another exercise** adds
+  one. In a gym exercise, **Save →** goes to the plan's next exercise that
+  still has sets to do — round after round if you do one set of each, which
+  is how a circuit is logged.
 - **Body.** This week's hard sets for chest, back, shoulders, arms, abs and legs
   — Monday to Sunday, against a target of 10–20 sets (20–40 for arms and legs,
   which are several muscles each; change it in Settings) — with where an even
@@ -54,8 +69,9 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
 - **＋ Log.** Today's session moves in one tap, any other skill, a **gym
   exercise**, a **quick gym log** (just the working sets per muscle group,
   when you don't want to log exercises), or a **weigh-in**.
-- **Gym exercises.** About 55 exercises (barbell, dumbbells, machines, cables,
-  push-ups, pull-ups, dips, abs work…) plus your own. Log each set as reps × kg and tick it:
+- **Gym exercises.** About 60 exercises (barbell, dumbbells, machines, cables,
+  push-ups, pull-ups, dips, abs work — including a timed floor circuit that
+  rests 20 seconds instead of the usual gym rest…) plus your own. Log each set as reps × kg and tick it:
   every tick is saved at once, and starts the rest timer. Milo shows what you
   did last time and suggests the next step — add weight when you hit the top of
   the rep range on every set, otherwise one more rep, and lighter after a long
@@ -128,8 +144,10 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   logged, but they can't award a standard you didn't earn.
 - **Exercise library.** Every area's ten steps in one list, each with what it
   trains and the reps and sets for all three standards.
-- **Week plan** (the link on Today's session). The whole rotation at a
-  glance, plus what each area needs next and the rungs beyond it.
+- **Week plan** (the link on Today's card). The whole rotation at a glance.
+  For a gym split: each day with its exercises and when it was last trained,
+  and "Do this today" to switch. For a skills routine: what each area needs
+  next and the rungs beyond it.
 - **Ghost radar.** Toggle "Show where I started" to see your past shape behind
   today's. Settings can re-zero that line to today — handy at the start of a new
   training block — without touching your sessions or your steps.

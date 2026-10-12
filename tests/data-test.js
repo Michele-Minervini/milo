@@ -206,8 +206,9 @@ GYM.forEach(e => {
     const n = GYM.filter(e => e.p === g && GYM_RETIRED.indexOf(e.id) === -1).length;
     check(g + ": at least 4 exercises to choose from (retired ones not counted)", n >= 4, n);
   });
-  check("the timed exercises are the two holds: the plank 20–60 s, the hold till failure 20–120 s",
-    same(GYM.filter(e => e.timed).map(e => [e.id, e.lo, e.hi]), [["plank", 20, 60], ["hold_failure", 20, 120]]));
+  check("the timed exercises: the plank 20–60 s, the hold till failure 20–120 s, and the six of the abs circuit (15–40 s a side, 20–60 s)",
+    same(GYM.filter(e => e.timed).map(e => [e.id, e.lo, e.hi]), [["plank", 20, 60], ["hold_failure", 20, 120],
+      ["star_crunch", 15, 40], ["leg_flutter", 20, 60], ["bicycle", 20, 60], ["plank_knee_elbow", 15, 40], ["boat_hold", 20, 60], ["seated_in_out", 20, 60]]));
   check("kg per hand: the dumbbell-in-each-hand and one-arm exercises, not the goblet squat",
     same(GYM.filter(e => e.perHand).map(e => e.id),
       ["bench_db", "incline_db", "row_db", "row_chest_db", "ohp_db", "lateral_db", "rear_fly_db", "curl_db", "hammer_db",
@@ -217,7 +218,8 @@ GYM.forEach(e => {
     same(["added", "assist", "bw"].map(l => GYM.filter(e => e.load === l).map(e => e.id)),
       [["dips", "chinup_w", "pullup_std", "back_ext", "bench_dips", "knee_raise_w"], ["pullup_assist"],
         ["pushup_std", "pushup_close", "pushup_wide", "pushup_decline", "ab_wheel", "plank",
-          "leg_lift", "leg_raise_single", "around_world", "knee_raise_side", "hold_failure"]]));
+          "leg_lift", "leg_raise_single", "around_world", "knee_raise_side", "hold_failure",
+          "star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"]]));
   check("push-ups count like a press (chest + ½ shoulders, ½ arms), pulls give ½ to arms, the straight-arm pulldown doesn't",
     ["pushup_std", "pushup_close", "pushup_wide", "pushup_decline"].every(id => same(GYM.filter(e => e.id === id).map(e => [e.p].concat(Array.from(e.s)))[0], ["chest", "shoulders", "arms"])) &&
     ["pulldown", "pulldown_behind", "pullup_std", "row_machine", "pulldown_close", "row_chest_db"].every(id => same(GYM.filter(e => e.id === id).map(e => [e.p].concat(Array.from(e.s)))[0], ["back", "arms"])) &&
@@ -251,7 +253,9 @@ section("frozen gym ids (they live in stored logs)");
     "wrist_curl_db", "wrist_curl_rev_db",
     "knee_raise_w", "leg_lift", "leg_raise_single", "around_world", "knee_raise_side", "hold_failure",
     // milo-v23
-    "pulldown_behind", "split_squat_db"
+    "pulldown_behind", "split_squat_db",
+    // milo-v27
+    "star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"
   ];
   const ids = GYM.map(e => e.id);
   const gone = FROZEN.filter(id => ids.indexOf(id) === -1);
@@ -274,8 +278,8 @@ section("retired gym exercises (out of the picker, still in the catalogue)");
 
 section("gym defaults");
 check("GROUP_DEFAULTS lists MODEL.GROUPS, in that order", same(keys(GROUP_DEFAULTS), GROUPS), J(keys(GROUP_DEFAULTS)));
-check("chest 4 · back 3 · shoulders 3 · arms 4 · abs 3 · legs 5",
-  same(GROUPS.map(g => (GROUP_DEFAULTS[g] || []).length), [4, 3, 3, 4, 3, 5]), J(GROUPS.map(g => (GROUP_DEFAULTS[g] || []).length)));
+check("chest 4 · back 3 · shoulders 3 · arms 4 · abs 6 (the circuit) · legs 5",
+  same(GROUPS.map(g => (GROUP_DEFAULTS[g] || []).length), [4, 3, 3, 4, 6, 5]), J(GROUPS.map(g => (GROUP_DEFAULTS[g] || []).length)));
 GROUPS.forEach(g => {
   const list = Array.from(GROUP_DEFAULTS[g] || []);
   const bad = list.filter(id => !GYM.some(e => e.id === id && e.p === g));
@@ -315,6 +319,46 @@ section("the catalogue fits the stored-data rules (model.js)");
     return !r || r.exId !== e.id || !same(r.sets, [e.lo, e.hi]) || !same(r.kg, kg);
   }).map(e => e.id);
   check("a gym log entry for every exercise is kept as logged", !logBad.length, logBad.join(", "));
+}
+
+section("weekly splits");
+{
+  const SPLITS = page.get("SPLITS"), SIDE = page.get("SPLIT_SIDE"), REST = page.get("GYM_REST");
+  const eq = (name, got, want) => check(name, same(got, want), "expected " + J(want) + "\n       got      " + J(got));
+  const byId = id => GYM.find(e => e.id === id);
+  eq("the three splits: 5 days, 6 days (back and shoulders apart), push / pull / legs twice",
+    keys(SPLITS).map(k => k + ":" + SPLITS[k].days.map(d => d.name).join("/")),
+    ["five:Legs/Back + Shoulders/Chest/Arms/Abs", "six:Legs/Back/Shoulders/Chest/Arms/Abs", "ppl6:Push/Pull/Legs/Push/Pull/Legs"]);
+  keys(SPLITS).forEach(k => {
+    const sp = SPLITS[k];
+    check(k + ": a key the data model keeps as a split, and not a skills rotation", /^[a-z0-9_]{1,16}$/.test(k) && !(k in Object.prototype) && !/^bb\d$/.test(k) && k !== "off" &&
+      M.sanitizeState(Object.assign(M.defaultState(), { routine: Object.assign(M.defaultRoutine(), { split: k }) })).routine.split === k);
+    check(k + ": a name and 2 to 20 days", typeof sp.name === "string" && sp.name && Array.isArray(sp.days) && sp.days.length >= 2 && sp.days.length <= 20);
+    const all = new Set();
+    sp.days.forEach((d, i) => {
+      const tag = k + " day " + (i + 1) + " (" + d.name + ")";
+      check(tag + ": a name, real groups without repeats, a side that is one", typeof d.name === "string" && !!d.name && Array.isArray(d.groups) && d.groups.length > 0 &&
+        d.groups.every(g => GROUPS.indexOf(g) !== -1) && new Set(d.groups).size === d.groups.length && (d.side === undefined || d.side === "push" || d.side === "pull"));
+      check(tag + ": a push or pull day doesn't also list shoulders or arms whole", !d.side || (d.groups.indexOf("shoulders") === -1 && d.groups.indexOf("arms") === -1));
+      const start = d.start ? Array.from(d.start) : [].concat.apply([], d.groups.map(g => Array.from(GROUP_DEFAULTS[g])));
+      const bad = start.filter(id => {
+        const e = byId(id);
+        if (!e || GYM_RETIRED.indexOf(id) !== -1) return true;
+        return !(d.groups.indexOf(e.p) !== -1 || (d.side && (e.p === "shoulders" || e.p === "arms") && SIDE[id] === d.side));
+      });
+      check(tag + ": starts from 3 to 8 exercises of its own, none retired, none twice", start.length >= 3 && start.length <= 8 && !bad.length && new Set(start).size === start.length, bad.join(", ") + " " + start.length);
+      d.groups.forEach(g => all.add(g));
+      if (d.side) { all.add("shoulders"); all.add("arms"); }
+    });
+    check(k + ": the whole rotation reaches all six groups", GROUPS.every(g => all.has(g)), Array.from(all).join(", "));
+  });
+  const sideBad = keys(SIDE).filter(id => !byId(id) || ["shoulders", "arms"].indexOf(byId(id).p) === -1 || ["push", "pull"].indexOf(SIDE[id]) === -1);
+  check("push / pull sides: only shoulder and arm exercises of the catalogue", !sideBad.length, sideBad.join(", "));
+  const unsided = GYM.filter(e => (e.p === "shoulders" || e.p === "arms") && !Object.prototype.hasOwnProperty.call(SIDE, e.id)).map(e => e.id);
+  check("…and every one of them has a side", !unsided.length, unsided.join(", "));
+  const restBad = keys(REST).filter(id => !byId(id) || !(Number.isInteger(REST[id]) && REST[id] >= 5 && REST[id] <= 600));
+  check("rests of their own: catalogue exercises, 5 to 600 whole seconds", !restBad.length, restBad.join(", "));
+  eq("the abs circuit rests 20 seconds", GROUP_DEFAULTS.abs.map(id => REST[id]), [20, 20, 20, 20, 20, 20]);
 }
 
 h.done(__filename);

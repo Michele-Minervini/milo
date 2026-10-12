@@ -24,7 +24,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v26";
+  var BUILD = "milo-v27";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -160,6 +160,18 @@
   }
   function routineOn() { return !!routineSessions(); }
 
+  // The other kind of weekly plan: a gym split (data.js, SPLITS: "five",
+  // "six", "ppl6"), kept in the same state.routine.split. Only its name is
+  // stored — and, for today alone, a day picked by hand
+  // (state.routine.override). Which day of the rotation today is and what it
+  // holds are worked out from the log (TRAINING.splitState), at most once
+  // between two changes: saveState() and refresh() drop it, like the gym index.
+  var planCache;            // undefined: not worked out yet · null: no gym split chosen
+  function gymPlan() {
+    if (planCache === undefined) planCache = TRAINING.splitState(state.log, nowMs(), state.routine.split, state.routine.override, gym());
+    return planCache;
+  }
+
   // Every preference change goes through here: the stamp lets each setting
   // sync on its own, so changing the rest timer on the phone can't undo a
   // routine chosen on the laptop.
@@ -279,6 +291,7 @@
   // proceed; only the automatic boot-time write is suppressed after a bad load.)
   function saveState() {
     gymIdx = null;
+    planCache = undefined;
     if (readOnly) { showBanner("newer"); return false; }
     try {
       var stored = localStorage.getItem(STORE_KEY);
@@ -1222,7 +1235,7 @@
                       once. A device with nothing on it at its first launch
                       is given NEWS straight away and never sees it.
        milo.come      "done" once "Coming from another device?" is answered. */
-  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v26";
+  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v27";
   // Dismissed in this page view: holds even where the flag can't be stored.
   var newsSeen = false;
   function flag(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
@@ -1258,7 +1271,7 @@
     var ws = weekState(now), fresh = untouched(), parts = [];
     if (fresh && flag(COME_KEY) !== "done") parts.push(comeCardHTML());
     if (!fresh) parts.push(todayNudgeHTML(ws, now));
-    parts.push(routineOn() ? sessionCardHTML() : setupCardHTML());
+    parts.push(gymPlan() ? planCardHTML() : (routineOn() ? sessionCardHTML() : setupCardHTML()));
     if (!fresh) parts.push(weighLineHTML(now));
     if (!newsSeen && flag(WHATSNEW_KEY) !== NEWS && !fresh) parts.push(whatsNewLineHTML());
     parts.push(state.log.some(isTraining) ? weekCardHTML(ws, now) : weekEmptyHTML());
@@ -1294,9 +1307,12 @@
         if (w[g] >= 1) idx = i;
       });
     }
+    // With a gym split: is that group part of today's day, and still to do?
+    var gp = gymPlan(), planned = !!gp && !gp.done && gp.days[gp.index].groups.indexOf(g) !== -1;
     var inner = '<span class="swatch"></span><span class="nd-text"><b>' + esc(groupName(g)) + ":</b> " + esc(text) +
-      (idx !== -1 ? " Today&#8217;s session " + (idx === 0 ? "starts with " : "includes ") + esc(shortAreaName(plan[idx].area).toLowerCase()) + "." : "") + "</span>";
-    return idx !== -1
+      (idx !== -1 ? " Today&#8217;s session " + (idx === 0 ? "starts with " : "includes ") + esc(shortAreaName(plan[idx].area).toLowerCase()) + "."
+        : (planned ? " Today&#8217;s plan covers that." : "")) + "</span>";
+    return idx !== -1 || planned
       ? '<p class="nudge gnudge" style="--area:' + groupColorVar(g) + '">' + inner + "</p>"
       : '<button class="nudge gnudge" type="button" data-group="' + g + '" style="--area:' + groupColorVar(g) + '">' + inner +
         '<span class="chev" aria-hidden="true">&#8250;</span></button>';
@@ -1339,14 +1355,96 @@
 
   function setupCardHTML() {
     return '<button class="today-card setup" id="setupRoutineBtn" type="button">' +
-      '<span class="today-title">&#43; Set up a weekly routine</span>' +
-      '<span class="today-sub">Get a &#8220;today&#8217;s session&#8221; plan across your week.</span></button>';
+      '<span class="today-title">&#43; Set up a weekly plan</span>' +
+      '<span class="today-sub">Pick a gym split or a skills routine, and Today shows what to do.</span></button>';
+  }
+
+  /* ---- Today's plan, for a gym split ---- */
+
+  // One exercise of the plan in a line: "3 × 8–12 · 20 kg" — the sets to do
+  // (what it had last time), its range, and the weight the suggestion gives —
+  // with "1 of 3 sets done" in front once it is started.
+  function planLine(ex, it) {
+    var sg = gymSuggestion(it.exId, null);
+    var kg = sg && hasKg(ex) && sg.kg > 0 ? " · " + fmtW(sg.kg) + (ex.load === "assist" ? " kg assist" : (ex.load === "added" ? " kg added" : " kg")) : "";
+    return (it.done && !it.complete ? it.done + " of " + it.sets + " sets done · " : "") +
+      it.sets + " × " + ex.lo + "–" + ex.hi + (ex.timed ? " sec" : "") + kg;
+  }
+  // Roughly how long what is left takes: each set's work and its rest, and a
+  // minute per exercise to set up. To the nearest 5 minutes.
+  function planMinutes(items) {
+    var sec = 0;
+    items.forEach(function (it) {
+      if (it.complete) return;
+      var ex = TRAINING.exercise(it.exId);
+      sec += 60 + (it.sets - it.done) * ((ex.timed ? Math.round((ex.lo + ex.hi) / 2) : 40) + restFor(ex));
+    });
+    return Math.max(5, Math.round(sec / 300) * 5);
+  }
+  // The first exercise of today's plan that still has sets to do, or null.
+  function planFirst() {
+    var p = gymPlan(), first = null;
+    if (p) p.items.forEach(function (it) { if (!first && !it.complete) first = it.exId; });
+    return first;
+  }
+  // Where "Save → next" goes from an exercise: the next one in today's plan
+  // that still has sets to do — after it in the list, then round again from
+  // the top, which is what makes a circuit work (one set of each, then the
+  // next round). "" when nothing else is left; null when that exercise isn't
+  // in today's plan (then the picker, as without a plan).
+  function planNext(exId) {
+    var p = gymPlan(), at = -1;
+    if (!p) return null;
+    p.items.forEach(function (it, i) { if (it.exId === exId) at = i; });
+    if (at === -1) return null;
+    for (var k = 1; k < p.items.length; k++) {
+      var it = p.items[(at + k) % p.items.length];
+      if (!it.complete) return it.exId;
+    }
+    return "";
+  }
+
+  function planCardHTML() {
+    var p = gymPlan(), day = p.days[p.index], n = p.days.length, first = planFirst();
+    var started = p.items.some(function (it) { return it.done > 0; });
+    var rows = p.items.map(function (it) {
+      var ex = TRAINING.exercise(it.exId);
+      return '<button class="td-move' + (it.complete ? " done" : "") + '" type="button" data-planex="' + esc(it.exId) + '" style="--area:' + exColor(ex) + '">' +
+        '<span class="tdcheck">' + (it.complete ? "&#10003;" : "") + "</span>" +
+        '<span class="tdinfo"><span class="tdname">' + esc(ex.name) + "</span>" +
+        '<span class="tdstep">' + esc(planLine(ex, it)) + "</span></span>" +
+        '<span class="chev">&#8250;</span></button>';
+    }).join("");
+    return '<div class="today-card session plancard">' +
+      '<div class="today-head"><h2 class="today-title">Today&#8217;s plan</h2>' +
+      '<button class="ws-link" id="weekBtn" type="button">Week plan &#8250;</button></div>' +
+      '<p class="today-sub ses-sub"><b>' + esc(day.name) + "</b> &middot; day " + (p.index + 1) + " of " + n +
+      (p.done ? " &middot; done" : " &middot; about " + planMinutes(p.items) + " min") + "</p>" +
+      '<div class="td-moves">' + rows + "</div>" +
+      (p.done ? '<p class="plan-done">&#10003; Done for today. Next: <b>' + esc(p.days[(p.index + 1) % n].name) + "</b>.</p>"
+        : (first ? '<button class="btn primary wide" id="planStartBtn" type="button">&#9654; ' + (started ? "Continue" : "Start") + ": " + esc(exName(first)) + "</button>" : "")) +
+      // Anything else done today that belongs to this day joins its list —
+      // and is on it next time: that is how the plan is changed.
+      '<div class="planlinks"><button class="linkbtn" id="planAddBtn" type="button">&#65291; Another exercise</button>' +
+      '<button class="linkbtn" id="planDayBtn" type="button">' + (p.done ? "Do another day" : "Different day") + "</button></div></div>";
+  }
+
+  // Today is another day of the split than the one worked out: kept for
+  // today only (the data model holds one such pick, with its date).
+  function setPlanDay(i) {
+    var p = gymPlan();
+    if (!p) return;
+    setPref("override", i === null ? null : { d: dateStr(nowMs()), day: i });
+    var ok = saveState();
+    refresh();
+    var now = gymPlan();
+    toast(ok ? "Today: " + now.days[now.index].name : notSavedMsg());
   }
 
   function whatsNewLineHTML() {
     return '<div class="today-card wnline">' +
       '<button class="wn-open" id="whatsNewBtn" type="button">' + ico("&#10024;") +
-      '<span class="wn-text"><b>Progress, group by group.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<span class="wn-text"><b>A weekly plan for the gym.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
       '<button class="nc-x" id="whatsNewX" type="button" aria-label="Hide what&#8217;s new">&#10005;</button></div>';
   }
 
@@ -1408,8 +1506,11 @@
   }
 
   function wireToday(host) {
-    host.querySelectorAll(".td-move").forEach(function (b) {
+    host.querySelectorAll(".td-move[data-area]").forEach(function (b) {
       b.addEventListener("click", function () { openCurrentStep(Number(b.getAttribute("data-area"))); });
+    });
+    host.querySelectorAll("[data-planex]").forEach(function (b) {
+      b.addEventListener("click", function () { openGym(b.getAttribute("data-planex"), null); });
     });
     var ns = $("#nextSessionBtn", host);
     if (ns) ns.addEventListener("click", function () {
@@ -1432,7 +1533,10 @@
       try { undo.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
     });
     var on = function (id, fn) { var b = $(id, host); if (b) b.addEventListener("click", fn); };
-    on("#setupRoutineBtn", openSettings);
+    on("#setupRoutineBtn", function () { openSettingsAt("#planSection", false); });
+    on("#planStartBtn", function () { var first = planFirst(); if (first) openGym(first, null); });
+    on("#planDayBtn", openWeek);
+    on("#planAddBtn", openGymPick);
     on("#startSessionBtn", openSession);
     on("#weekBtn", openWeek);
     on("#toBodyBtn", function () { showTab("body", true); });
@@ -2724,7 +2828,7 @@
       "<h4>Week streak</h4><p>Weeks in a row, Monday to Sunday, with 2 or more workouts. This week joins the streak once it has 2; until then it doesn&#8217;t break it.</p>" +
       "<h4>Instead of the day streak</h4><p>Milo used to count days in a row. Rest days are part of training, so it counts weeks now.</p>" +
       "<h4>Records</h4><p>A record is a set that beats everything you did before in that gym exercise. With weights: a heavier weight than ever, in a set that is " +
-      "no more than two reps short of the fewest you aim for (at least 6 reps if you aim for 8&#8211;12). Without weights: more reps in one set, or a hold that reaches the next 5 seconds. " +
+      "no more than two reps short of the fewest you aim for (at least 6 reps if you aim for 8&#8211;12). Without weights: more reps in one set, or for a timed exercise reaching the next 5 seconds. " +
       "Warm-ups never count, and the first day of an exercise only sets the mark to beat.</p>" +
       "</div>";
   }
@@ -2824,11 +2928,16 @@
       return pickRowHTML('data-area="' + p.areaIdx + '"', areaColorVar(p.area), p.area.icon,
         esc(p.stepObj.name) + " &middot; step " + p.step, esc(prescriptionLine(p)) + " &middot; " + esc(goalPhrase(p)));
     }).join("") + "</div>" : "";
+    var gp = gymPlan(), left = gp ? gp.items.filter(function (it) { return !it.complete; }) : [];
+    var gymRows = left.length ? "<h4>Today&#8217;s plan &middot; " + esc(gp.days[gp.index].name) + "</h4>" + '<div class="librows">' + left.map(function (it) {
+      var ex = TRAINING.exercise(it.exId);
+      return pickRowHTML('data-planex="' + esc(it.exId) + '"', exColor(ex), "&#127947;&#65039;", esc(ex.name), esc(planLine(ex, it)));
+    }).join("") + "</div>" : "";
     var todayW = weighInOn(quickDays().today, null), lastW = TRAINING.bodyWeight(state.log, nowMs()).last;
     var weighSub = todayW ? "Today: " + esc(fmtKg(todayW.kg)) + " kg. Tap to change it."
       : (lastW ? "Last " + esc(dayYear(lastW.ts)) + ": " + esc(fmtKg(lastW.kg)) + " kg" : "Body weight, about once a week.");
     return sheetHead({ title: "&#65291; Log", sub: "What do you want to log?" }) +
-      '<div class="sheet-body logpick">' + planRows +
+      '<div class="sheet-body logpick">' + gymRows + planRows +
       "<h4>" + (plan.length ? "Other skills" : "Skills") + "</h4>" + '<div class="librows">' +
       pickRowHTML('id="pickSkill"', "var(--axis)", "&#129336;", plan.length ? "Another skill" : "Skill session", "Pick one of the six ladders, at your step.") + "</div>" +
       "<h4>Gym</h4>" + '<div class="librows">' +
@@ -2860,6 +2969,10 @@
   function whatsNewPaneHTML() {
     return sheetHead({ title: ico("&#10024;") + "What&#8217;s new in Milo", sub: "Once, after this update" }) +
       '<div class="sheet-body volinfo whatsnew">' +
+      "<h4>A weekly plan for the gym</h4><p>In <b>Settings &#8594; Weekly plan</b>, pick your split: 5 days, 6 days (back and shoulders apart) or Push / Pull / Legs. " +
+      "Today then shows the day you are on and its exercises, each with its sets and the weight to use. Milo works the day out from what you log, so skipping a day or training out of order is fine; " +
+      "<b>Different day</b> picks another one for today. <b>Save &#8594;</b> in a gym exercise now goes to the plan&#8217;s next exercise, round after round if you do one set of each.</p>" +
+      "<h4>Six more abs exercises</h4><p>Star crunch, leg flutters, bicycles, plank knee to elbow, boat hold and seated in &amp; outs: timed, in seconds, with a 20-second rest. They are the Abs day&#8217;s starting list.</p>" +
       "<h4>Progress, muscle group by muscle group</h4><p>The bars count how much you did. Now <b>Body</b> also says whether it got harder: each group&#8217;s card shows how many of its gym exercises " +
       "went <b>up on last time</b> (a heavier top weight, or more reps at the same weight). Open a group for the list, the kilos lifted and its strength over 8 weeks.</p>" +
       "<h4>Records</h4><p>When a set beats everything you did before in that exercise, Milo tells you as you tick it, marks it in History with a " + ico(TROPHY) +
@@ -3135,7 +3248,7 @@
   function gymEntryText(e) {
     var ex = TRAINING.exercise(e.exId), c = countedSets(e), n = c.sets.length;
     if (c.only) return "Warm-ups only: " + setsText(ex, c.sets, c.kg);
-    return n + (ex && ex.timed ? (n === 1 ? " hold" : " holds") : (n === 1 ? " set" : " sets")) + warmNote(c.warm) + ": " + setsText(ex, c.sets, c.kg);
+    return n + (n === 1 ? " set" : " sets") + warmNote(c.warm) + ": " + setsText(ex, c.sets, c.kg);
   }
   // The same for "Last time" lines: "8, 8, 7 × 60 kg (+1 warm-up)".
   function lastSetsText(ex, e) {
@@ -3310,6 +3423,13 @@
     return mark ? '<p class="glast grec"><b>To beat</b> &middot; ' + esc(toBeatText(ex, mark)) + "</p>" : "";
   }
 
+  // The rest a ticked set starts: the gym rest from Settings, or the
+  // exercise's own when that is shorter (data.js, GYM_REST: the abs circuit).
+  function restFor(ex) {
+    var own = ex && Object.prototype.hasOwnProperty.call(GYM_REST, ex.id) ? GYM_REST[ex.id] : Infinity;
+    return Math.min(state.settings.restGym, own);
+  }
+
   function gymSuggestion(exId, excludeId) {
     try { return TRAINING.suggest(exId, state.log, nowMs(), { exclude: excludeId }); } catch (e) { return null; }
   }
@@ -3415,7 +3535,7 @@
     var text;
     switch (sg.kind) {
       case "first":
-        if (ex.timed) text = "First time: " + (sg.sets || 3) + " holds, as long as you can with good form, up to " + ex.hi + " seconds.";
+        if (ex.timed) text = "First time: " + (sg.sets || 3) + " sets, each as long as you can with good form, up to " + ex.hi + " seconds.";
         else if (ex.load === "ext") text = "First time: pick a weight you could lift about " + (ex.hi + 2) + " times, and do " + (sg.sets || 3) + " sets of " + ex.hi + ".";
         else if (ex.load === "assist") text = "First time: pick the help that lets you do about " + (ex.hi + 2) + " good reps, and do " + (sg.sets || 3) + " sets of " + ex.hi + ".";
         else text = "First time: " + (sg.sets || 3) + " sets at bodyweight, as many good reps as you can, up to " + ex.hi + ".";
@@ -3433,7 +3553,7 @@
       case "deload": text = "Two sessions short of the goal: " + (ex.load === "assist" ? "more help, " : "drop to ") + kgTxt + " and build back up: " + list + "."; break;
       case "reps": text = "<b>Beat last time:</b> " + list + (weighted ? " at " + kgTxt : "") + "."; break;
       case "harder":
-        text = ex.timed ? "Every hold at " + ex.hi + " seconds: time for a harder variation, or add weight."
+        text = ex.timed ? "Every set at " + ex.hi + " seconds: time for a harder variation, or add weight."
           : (ex.load === "added" ? "Every set at " + ex.hi + " " + unit + ": add " + fmtW(ex.inc) + " kg next time."
             : "Every set at " + ex.hi + " " + unit + ": time for a harder variation, or add weight.");
         break;
@@ -3497,7 +3617,13 @@
       (d.entryId ? '<button type="button" class="btn danger wide qdel" id="gymDelete">Delete this exercise from the log</button>' : "") +
       "</div>" +
       '<div class="sheet-foot gymfoot"><button type="button" class="btn wide" id="gymDone">Done</button>' +
-      '<button type="button" class="btn primary wide" id="gymNext">Save &#8594; next exercise</button></div>';
+      // With a gym split, "next" is the plan's next exercise, by name.
+      '<button type="button" class="btn primary wide" id="gymNext">Save &#8594; ' + gymNextLabel(d.exId) + "</button></div>";
+  }
+
+  function gymNextLabel(exId) {
+    var nx = planNext(exId);
+    return nx ? esc(exName(nx)) : (nx === "" ? "done for today" : "next exercise");
   }
 
   function parseKgInput(v) {
@@ -3714,7 +3840,7 @@
           r.done = true;
           d.dirty = true;
           var ok = commitGym();
-          if (ok && state.settings.autoRest && !readOnly) startRest(state.settings.restGym, { gym: true });
+          if (ok && state.settings.autoRest && !readOnly) startRest(restFor(ex), { gym: true });
           var now = ok && live && storageOk && !readOnly ? dayRecord(d.exId, d.date) : null;
           if (now && (!was || now.kg !== was.kg || now.reps !== was.reps || now.by !== was.by)) {
             recToast = "\ud83c\udfc6 New record: " + oneSet(ex, now.kg, now.reps);
@@ -3786,22 +3912,27 @@
     if (gymRowsValid(false) && d.dirty) commitGym();
     saveGymDraft();
     var logged = !!d.entryId;
+    // Where "next" leads: the plan's next exercise, "" when the plan has
+    // nothing else left, null without a plan (or outside it): the picker.
+    var nx = next ? planNext(d.exId) : null, p = gymPlan();
     gymDraft = null;
-    leaveGym(next);
+    leaveGym(next, nx);
     // "Not saved" always shows; "saved" waits its turn behind a record
     // toast that is still up (Save → next is often tapped right after the tick).
     if (logged && d.dirty) {
       if (!(storageOk && !readOnly)) toast(notSavedMsg());
-      else if (nowMs() >= recToastUntil) toast(exName(d.exId) + " saved ✓");
+      else if (nowMs() >= recToastUntil) toast(nx === "" && p && p.done ? "Today's plan is done ✓" : exName(d.exId) + " saved ✓");
     }
   }
 
-  // Close the gym sheet (and the pickers under it); with next, land on the
-  // exercise picker for the next one.
-  function leaveGym(next) {
+  // Close the gym sheet (and the pickers under it). With next: on to the
+  // plan's next exercise (nx: its id), or — nx "" — nowhere, the plan is
+  // through; without a plan (nx null) to the exercise picker.
+  function leaveGym(next, nx) {
     uiStack.pop();
     while (uiStack.length && /^(logpick|logskill|gympick)$/.test(uiStack[uiStack.length - 1].t)) uiStack.pop();
-    if (next) uiStack.push({ t: "gympick" });
+    if (next && nx) { openGym(nx, null); return; }
+    if (next && nx !== "") uiStack.push({ t: "gympick" });
     renderSheet();
   }
 
@@ -3810,7 +3941,7 @@
   // The chart of an exercise's latest sessions, with its words. "" when there
   // is nothing to chart yet. What is plotted depends on the exercise
   // (TRAINING.trend): an estimated 1-rep max, a top weight, reps or seconds.
-  var CHART_NAME = { e1rm: "Estimated 1-rep max", assist: "Help from the machine", reps: "Most reps in a set", secs: "Longest hold" };
+  var CHART_NAME = { e1rm: "Estimated 1-rep max", assist: "Help from the machine", reps: "Most reps in a set", secs: "Longest set" };
   function exerciseChartHTML(ex) {
     var tr = TRAINING.trend(gym(), ex.id), pts = tr.points, kind = tr.kind;
     if (!pts.length) return "";
@@ -3851,7 +3982,7 @@
         (ex.perHand ? " Per hand, like the weights you log." : "")
       : (kind === "kg" ? (ex.load === "added" ? "The most weight you added each day (0 is your bodyweight alone)." : "The heaviest counted set of each day.")
         : (kind === "assist" ? "The least help you used each day. Lower is harder."
-          : (kind === "secs" ? "Your longest hold each day, in seconds." : "Your most reps in one set each day.")));
+          : (kind === "secs" ? "Your longest set each day, in seconds." : "Your most reps in one set each day.")));
     var aria = title + " for " + ex.name + " over the last " + pts.length + " sessions. " + words + " " +
       (kind === "assist" ? "Least help " : "Highest ") + amount(num(peak.value)) + " on " + dm(peak.ts) + "." +
       (recN ? (kind === "e1rm" ? " New top weight on " : " A record on ") + recN + " of these days." : "");
@@ -3869,7 +4000,7 @@
   // What a record is for this exercise, in one or two plain sentences.
   function recordRuleText(ex) {
     var floor = TRAINING.recordFloor(ex.id), n = floor + (floor === 1 ? " rep" : " reps");
-    if (ex.timed) return "A record is a hold that reaches the next " + TRAINING.TIMED_STEP + " seconds: 45, 50, 55…";
+    if (ex.timed) return "A record is a set that reaches the next " + TRAINING.TIMED_STEP + " seconds: 45, 50, 55…";
     if (!floor) return "A record is more reps in one set than ever before.";
     if (ex.load === "assist") return "A record is less help than ever before, in a set of at least " + n + ".";
     if (ex.load === "added") return "A record is more added weight than ever before, in a set of at least " + n + ". With no weight on, it is more reps in one set than ever.";
@@ -3890,7 +4021,7 @@
     // floor isn't it), hence "to beat" rather than "heaviest".
     var marks = "", plain = !hasKg(ex) || ex.timed;
     if (st.w && st.w.kg > 0) marks += row(ex.load === "assist" ? "Help to beat" : "Weight to beat", oneSet(ex, st.w.kg, st.w.reps) + " · " + dayYear(st.w.ts));
-    if (st.r) marks += row(ex.timed ? "Longest hold" : (plain ? "Most reps" : (ex.load === "assist" ? "Most reps, no help" : "Most reps, no weight on")),
+    if (st.r) marks += row(ex.timed ? "Longest set" : (plain ? "Most reps" : (ex.load === "assist" ? "Most reps, no help" : "Most reps, no weight on")),
       (ex.timed ? st.r.reps + " sec" : String(st.r.reps)) + " · " + dayYear(st.r.ts));
     if (!marks && best) marks = row("Best set", best.kg ? best.reps + (ex.timed ? " sec" : "") + " × " + fmtW(best.kg) + (ex.load === "assist" ? " kg assist" : (ex.load === "added" ? " kg added" : " kg")) : best.reps + " " + unit);
     var numbers = sessions.length
@@ -4014,7 +4145,7 @@
     ["added", "Bodyweight + weight", "Like dips: kg is what you add"],
     ["assist", "Assisted", "A machine that helps: less kg is harder"],
     ["bw", "Bodyweight only", "No weight: count reps"],
-    ["timed", "Timed hold", "Like a plank: count seconds"]
+    ["timed", "Timed", "Like a plank: count seconds"]
   ];
 
   function openExForm(exId) {
@@ -4048,7 +4179,7 @@
       (typeInfo ? '<p class="hint">' + esc(typeInfo[2]) + ".</p>" : "") +
       ((f.equip === "dumbbell" || f.equip === "kettlebell") && (f.type === "ext" || f.type === "added")
         ? '<label class="exchk"><input type="checkbox" id="exPerHand"' + (f.perHand ? " checked" : "") + "> One weight in each hand (log kg per hand)</label>" : "") +
-      "<h4>" + (f.type === "timed" ? "Seconds per hold" : "Reps per set") + "</h4>" +
+      "<h4>" + (f.type === "timed" ? "Seconds per set" : "Reps per set") + "</h4>" +
       '<div class="volrow"><span class="vlab" id="fLoL">Fewest</span><input class="stepval" type="number" inputmode="numeric" id="fLo" min="1" max="600" value="' + f.lo + '" aria-labelledby="fLoL"></div>' +
       '<div class="volrow"><span class="vlab" id="fHiL">Most</span><input class="stepval" type="number" inputmode="numeric" id="fHi" min="1" max="600" value="' + f.hi + '" aria-labelledby="fHiL"></div>' +
       "</div>" +
@@ -4351,7 +4482,7 @@
   function openerKey(el) {
     if (!el || el === document.body) return "";
     if (el.id) return "#" + el.id;
-    var attrs = ["data-id", "data-group", "data-day", "data-area", "data-filter"];
+    var attrs = ["data-id", "data-group", "data-day", "data-area", "data-filter", "data-planex"];
     for (var i = 0; i < attrs.length; i++) {
       var v = el.getAttribute && el.getAttribute(attrs[i]);
       if (v && /^[A-Za-z0-9_-]{1,40}$/.test(v)) return "[" + attrs[i] + '="' + v + '"]';
@@ -4744,10 +4875,36 @@
 
   /* ---------- The week, and where each area is heading ---------- */
 
+  // A gym split's rotation: each day with what it holds and when it was last
+  // trained, today's marked, and "Do this today" on the others.
+  function planWeekPaneHTML(p) {
+    var days = p.days.map(function (d, i) {
+      var cur = i === p.index;
+      var last = d.last ? "Last trained " + (dayLabel(d.last) === shortDay(d.last) ? "on " + dayYear(d.last) : dayLabel(d.last).toLowerCase()) : "Not trained yet";
+      return '<div class="wkday' + (cur ? " now" : "") + '">' +
+        '<div class="wkhead"><span class="wkdaylabel">Day ' + (i + 1) + " &middot; " + esc(d.name) + "</span>" +
+        (cur ? '<span class="wknow">today</span>' : '<button class="btn wkpick" type="button" data-planday="' + i + '">Do this today</button>') + "</div>" +
+        '<p class="wkex">' + esc(d.exercises.map(exName).join(" · ")) + "</p>" +
+        '<p class="wklast">' + esc(last) + "</p></div>";
+    }).join("");
+    var why = p.source === "override" ? "You picked today&#8217;s day yourself."
+      : (p.source === "today" ? "Today&#8217;s day is the one you are training."
+        : (p.source === "next" ? "Today&#8217;s day is the one after the last you trained." : "Nothing logged for this split yet, so it starts at day 1."));
+    return sheetHead({ title: "&#128198; Week plan", sub: esc(p.name) + " &middot; today: " + esc(p.days[p.index].name) }) +
+      '<div class="sheet-body week">' +
+      "<p>" + why + " The plan follows what you log: skip a day or train out of order and it carries on from there. " +
+      "Each day lists what you did the last two times you trained it, so change an exercise and the plan changes with you.</p>" +
+      '<div class="wkdays">' + days + "</div>" +
+      (p.source === "override" ? '<div class="btnrow"><button class="btn" id="planAutoBtn" type="button">Back to the day Milo worked out</button></div>' : "") +
+      "</div>";
+  }
+
   function weekPaneHTML() {
+    var gp = gymPlan();
+    if (gp) return planWeekPaneHTML(gp);
     if (!routineOn()) {
       return sheetHead({ title: "&#128198; Week plan", sub: "", back: true, backLabel: "Home" }) +
-        '<div class="sheet-body"><p class="empty">No routine set up yet.<br>Choose 2, 3 or 6 days a week in Settings and your plan appears here.</p></div>';
+        '<div class="sheet-body"><p class="empty">No plan set up yet.<br>Pick a gym split or a skills routine in Settings and it appears here.</p></div>';
     }
     var sessions = routineSessions();
     var cur = state.routine.sessionIndex % sessions.length;
@@ -5068,10 +5225,22 @@
 
   function settingsPaneHTML() {
     var url = shareURL(), space = syncSpace();
-    var routineChips = '<button class="chip' + (!routineOn() ? " sel" : "") + '" data-routine="off">Off</button>' +
-      [2, 3, 6].map(function (d) {
-        return '<button class="chip' + (state.routine.split === "bb" + d ? " sel" : "") + '" data-routine="' + d + '">' + d + " days/week</button>";
-      }).join("");
+    // One weekly plan at a time: a gym split, a skills rotation, or none. A
+    // split a newer version added shows as none here, and is left alone
+    // until something else is tapped.
+    var cur = state.routine.split, gp = gymPlan();
+    var planChip = function (val, label) {
+      var on = val === "off" ? (!gp && !routineOn()) : cur === val;
+      return '<button class="chip' + (on ? " sel" : "") + '" type="button" data-routine="' + val + '" aria-pressed="' + on + '">' + label + "</button>";
+    };
+    var gymChips = TRAINING.splits().map(function (sp) { return planChip(sp.id, esc(sp.name)); }).join("");
+    var skillChips = [2, 3, 6].map(function (d) { return planChip("bb" + d, d + " days"); }).join("");
+    var planPreview = gp
+      ? '<div class="routine-preview">' + gp.days.map(function (d, i) {
+          return '<div class="rp-row"><span class="rp-day">Day ' + (i + 1) + '</span><span class="rp-moves"><b>' + esc(d.name) + "</b>: " + esc(d.exercises.map(exName).join(", ")) + "</span></div>";
+        }).join("") + "</div>" +
+        '<p class="hint">Each day lists what you did the last two times you trained it; before that, a starting list. Today shows the day after the last one you trained.</p>'
+      : (routineOn() ? '<div class="routine-preview">' + routinePreviewHTML() + "</div>" : "");
     // Anything wrong with saving goes first — it's the one thing here that
     // can't wait to be scrolled to.
     var warnings =
@@ -5083,10 +5252,16 @@
     return sheetHead({ title: "&#9881;&#65039; Settings", sub: "", back: false }) +
       '<div class="sheet-body settings">' +
       warnings +
-      "<h4>Weekly routine</h4>" +
-      "<p>Pick how many days a week you practise the skills; the app spreads the six ladders across them and shows today&#8217;s session on the Today tab.</p>" +
-      '<div class="chips">' + routineChips + "</div>" +
-      (routineOn() ? '<div class="routine-preview">' + routinePreviewHTML() + "</div>" : "") +
+      '<h4 id="planSection">Weekly plan</h4>' +
+      "<p>Pick one, and Today shows what to do. A <b>gym split</b> turns through its days as you train them; a <b>skills routine</b> spreads the six ladders over the week.</p>" +
+      '<p class="planlab" id="planGymL">Gym split</p>' +
+      '<div class="chips" role="group" aria-labelledby="planGymL">' + gymChips + "</div>" +
+      '<p class="hint"><b>5 days</b>: legs, back + shoulders, chest, arms, abs. <b>6 days</b>: the same with back and shoulders on days of their own. ' +
+      "<b>Push / Pull / Legs</b>: each twice a week.</p>" +
+      '<p class="planlab" id="planSkillL">Skills routine</p>' +
+      '<div class="chips" role="group" aria-labelledby="planSkillL">' + skillChips + "</div>" +
+      '<div class="chips planoff">' + planChip("off", "No plan") + "</div>" +
+      planPreview +
       volTargetsHTML() +
       restSettingsHTML() +
       syncSectionHTML(space) +
@@ -5350,6 +5525,15 @@
 
     if (view.t === "quick") wireQuick(sheet);
 
+    if (view.t === "week") {
+      // A gym split: another day for today, or back to the one worked out.
+      sheet.querySelectorAll("[data-planday]").forEach(function (b) {
+        b.addEventListener("click", function () { setPlanDay(Number(b.getAttribute("data-planday"))); closeAll(); });
+      });
+      var auto = $("#planAutoBtn", sheet);
+      if (auto) auto.addEventListener("click", function () { setPlanDay(null); closeAll(); });
+    }
+
     if (view.t === "library") {
       sheet.querySelectorAll(".librow").forEach(function (b) {
         b.addEventListener("click", function () { openArea(Number(b.getAttribute("data-area"))); });
@@ -5369,6 +5553,9 @@
           var ai = Number(b.getAttribute("data-area"));
           openLog(ai, state.areas[AREAS[ai].id].step - 1);
         });
+      });
+      sheet.querySelectorAll(".librow[data-planex]").forEach(function (b) {
+        b.addEventListener("click", function () { openGym(b.getAttribute("data-planex"), null); });
       });
       var ps = $("#pickSkill", sheet);
       if (ps) ps.addEventListener("click", function () { pushView({ t: "logskill" }); });
@@ -5437,16 +5624,19 @@
 
       sheet.querySelectorAll("[data-routine]").forEach(function (b) {
         b.addEventListener("click", function () {
-          var val = b.getAttribute("data-routine");
-          var split = val === "off" ? "off" : "bb" + Number(val);
-          // Only rewind the rotation when the split actually changes.
+          var split = b.getAttribute("data-routine");
+          // Only rewind a skills rotation when the plan actually changes; a
+          // gym split has nothing to rewind (its day comes from the log), and
+          // a day picked by hand belonged to the plan before.
           if (split !== state.routine.split) {
             setPref("split", split);
             if (split !== "off") setPref("sessionIndex", 0);
+            if (state.routine.override) setPref("override", null);
           }
           saveState();
-          renderToday();
+          refresh();
           renderSheet();
+          focusIn($("#sheet"), '[data-routine="' + split + '"]');
         });
       });
       $("#copyBtn", sheet).addEventListener("click", function () {
@@ -5850,6 +6040,7 @@
   function refresh() {
     TRAINING.useExercises(state.exercises);
     gymIdx = null;
+    planCache = undefined;
     renderCards();
     animateRadar();
     renderSkillNudge();

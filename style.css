@@ -2101,3 +2101,15 @@ p.lc-cap { margin: 6px 2px 0; font-size: 0.8rem; color: var(--muted); line-heigh
 .pg-tag.up { color: var(--good); }
 .pg-tag.down { color: var(--ink-2); }
 .groupsheet .pg-kg { margin-top: 10px; }
+
+/* ---------- The plan: a gym split ---------- */
+.plan-done { margin: 0 0 6px; font-size: 0.9rem; color: var(--good); font-weight: 650; }
+.plan-done b { font-weight: 750; }
+.gymfoot .btn { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.settings p.planlab { margin: 12px 0 6px; font-size: 0.78rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.planoff { margin-top: 12px; }
+.wkday .wkex { margin: 6px 0 0; font-size: 0.86rem; color: var(--ink); line-height: 1.45; }
+.wkday .wklast { margin: 4px 0 0; font-size: 0.76rem; color: var(--muted); }
+.wkhead .wkpick { min-height: 36px; padding: 4px 12px; font-size: 0.8rem; flex: none; margin-left: auto; }
+.planlinks { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px; }
+.planlinks .linkbtn { margin: 0; }

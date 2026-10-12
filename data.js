@@ -8,7 +8,7 @@
    ============================================================ */
 
 /* Build stamp: app.js refuses to run on files from two different releases. */
-const DATA_BUILD = "milo-v26";
+const DATA_BUILD = "milo-v27";
 
 const AREAS = [
   {
@@ -1354,6 +1354,15 @@ const GYM_EXERCISES = [
   { id: "around_world",     name: "Around the world",      p: "abs", s: [], equip: "bodyweight", lo: 8,  hi: 15, inc: 2.5, perHand: false, load: "bw",    timed: false },
   { id: "knee_raise_side",  name: "Knee raise, each side", p: "abs", s: [], equip: "bodyweight", lo: 10, hi: 20, inc: 2.5, perHand: false, load: "bw",    timed: false },
   { id: "hold_failure",     name: "Hold till failure",     p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 120, inc: 2.5, perHand: false, load: "bw",   timed: true },
+  // An abs circuit on the floor, each one done for time (seconds are logged,
+  // not reps): one set of each, a short rest (GYM_REST), three rounds. The
+  // "each side" ones are timed per side.
+  { id: "star_crunch",      name: "Star crunch, each side",         p: "abs", s: [], equip: "bodyweight", lo: 15, hi: 40, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "leg_flutter",      name: "Leg flutters",                   p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "bicycle",          name: "Bicycles",                       p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "plank_knee_elbow", name: "Plank knee to elbow, each side", p: "abs", s: [], equip: "bodyweight", lo: 15, hi: 40, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "boat_hold",        name: "Boat hold",                      p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "seated_in_out",    name: "Seated in & outs",               p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true },
   // Legs
   { id: "squat_bb",      name: "Back squat",                 p: "legs",      s: [],                    equip: "barbell",    lo: 5,  hi: 8,  inc: 2.5, perHand: false, load: "ext",    timed: false },
   { id: "leg_press",     name: "Leg press",                  p: "legs",      s: [],                    equip: "machine",    lo: 8,  hi: 12, inc: 5,   perHand: false, load: "ext",    timed: false },
@@ -1381,14 +1390,88 @@ const GYM_RETIRED = ["pullup_assist", "crunch_cable", "ab_wheel"];
    barbells: quick to set up, easy to learn, safe to take close to
    failure without a spotter. Most important first — a day with room for fewer keeps
    the front of the list — and in the order a session does them (the
-   big movement first). Abs also get the leg-raise skill. Every id is
-   a GYM_EXERCISES id whose p is this group, and none is retired
+   big movement first). Abs: the timed floor circuit. Every id is a
+   GYM_EXERCISES id whose p is this group, and none is retired
    (tests/data-test.js). */
 const GROUP_DEFAULTS = {
   chest:     ["bench_db", "incline_db", "chest_press", "pec_deck"],
   back:      ["pulldown", "row_cable", "row_db"],
   shoulders: ["ohp_db", "lateral_db", "rear_fly_db"],
   arms:      ["curl_db", "pushdown", "hammer_db", "oh_ext_cable"],
-  abs:       ["knee_raise_w", "leg_lift", "knee_raise_side"],
+  abs:       ["star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"],
   legs:      ["leg_press", "leg_curl", "bulgarian_db", "leg_ext", "calf_raise"]
+};
+
+/* Exercises with a rest of their own, in seconds, in place of the gym rest
+   from Settings when that is longer: the abs circuit moves on after 20. */
+const GYM_REST = {
+  star_crunch: 20, leg_flutter: 20, bicycle: 20, plank_knee_elbow: 20, boat_hold: 20, seated_in_out: 20
+};
+
+/* ---------- Weekly splits: the plan (P6) ----------
+
+   A split is a rotation of days; each day trains some muscle groups.
+   state.routine.split holds a key of this table (or of app.js's skill
+   rotations bb2/bb3/bb6, or "off"). Nothing else about the plan is stored:
+   which day today is, and which exercises it has, are worked out from what
+   was logged (training.js, splitState).
+
+     name    as Settings shows it
+     days    in rotation order, each { name, groups, side?, start? }
+       groups  the day trains every gym exercise whose own group (p) is one
+               of these
+       side    "push" | "pull": the day also takes the shoulder and arm
+               exercises of that side (SPLIT_SIDE) — how Push / Pull / Legs
+               shares two groups between two days
+       start   what the day starts from before it has a history: exercise
+               ids. Left out: GROUP_DEFAULTS of its groups, in order.
+
+   Keys are 1–16 of a–z, 0–9 and _ (what the data model keeps as a split),
+   a split has 20 days at most (state.routine.override.day), and every
+   start id is a GYM_EXERCISES id of that day that isn't retired
+   (tests/data-test.js). A split can be added freely; removing or renaming
+   one turns the plan of whoever chose it off. */
+const SPLITS = {
+  five: {
+    name: "5 days",
+    days: [
+      { name: "Legs", groups: ["legs"] },
+      { name: "Back + Shoulders", groups: ["back", "shoulders"] },
+      { name: "Chest", groups: ["chest"] },
+      { name: "Arms", groups: ["arms"] },
+      { name: "Abs", groups: ["abs"] }
+    ]
+  },
+  six: {
+    name: "6 days",
+    days: [
+      { name: "Legs", groups: ["legs"] },
+      { name: "Back", groups: ["back"] },
+      { name: "Shoulders", groups: ["shoulders"] },
+      { name: "Chest", groups: ["chest"] },
+      { name: "Arms", groups: ["arms"] },
+      { name: "Abs", groups: ["abs"] }
+    ]
+  },
+  ppl6: {
+    name: "Push / Pull / Legs",
+    days: [
+      { name: "Push", groups: ["chest"], side: "push", start: ["bench_db", "ohp_db", "incline_db", "lateral_db", "pushdown", "oh_ext_cable"] },
+      { name: "Pull", groups: ["back"], side: "pull", start: ["pulldown", "row_cable", "row_db", "rear_fly_db", "curl_db", "hammer_db"] },
+      { name: "Legs", groups: ["legs", "abs"], start: ["leg_press", "leg_curl", "bulgarian_db", "leg_ext", "calf_raise", "leg_lift"] },
+      { name: "Push", groups: ["chest"], side: "push", start: ["bench_db", "ohp_db", "incline_db", "lateral_db", "pushdown", "oh_ext_cable"] },
+      { name: "Pull", groups: ["back"], side: "pull", start: ["pulldown", "row_cable", "row_db", "rear_fly_db", "curl_db", "hammer_db"] },
+      { name: "Legs", groups: ["legs", "abs"], start: ["leg_press", "leg_curl", "bulgarian_db", "leg_ext", "calf_raise", "leg_lift"] }
+    ]
+  }
+};
+
+/* Which side of a push / pull split a shoulder or arm exercise is on: the
+   presses, side raises and triceps push; rear delts, biceps and forearms
+   pull. One that isn't listed (an exercise of your own) counts on both. */
+const SPLIT_SIDE = {
+  ohp_bb: "push", ohp_db: "push", lateral_db: "push", lateral_cable: "push",
+  rear_fly_db: "pull", face_pull: "pull",
+  pushdown: "push", oh_ext_cable: "push", skull_bb: "push", bench_dips: "push",
+  curl_db: "pull", hammer_db: "pull", curl_bb: "pull", wrist_curl_db: "pull", wrist_curl_rev_db: "pull"
 };

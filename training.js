@@ -15,7 +15,9 @@
    progress: records, each exercise's chart, each muscle group's
    gym exercises, whether they got harder this week and the
    group's strength trend, body weight, and the axis a line chart
-   is drawn on. Data only: the words the app shows are app.js's.
+   is drawn on. And the plan: which day of the weekly split today
+   is and what it holds. Data only: the words the app shows are
+   app.js's.
 
    Pure functions over plain values: no DOM, no storage, and no
    clock — whoever needs "this week" passes the time in — so
@@ -32,7 +34,8 @@
    call useExercises([]) when they are done.
 
    Reads the tables in data.js (AREAS, GROUP_INFO, AREA_GROUPS,
-   VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED) and the
+   VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED, SPLITS,
+   SPLIT_SIDE, GROUP_DEFAULTS) and the
    calendar-day helpers and sanitizeExercise in model.js, so it
    loads after both and before app.js.
 
@@ -54,7 +57,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v26";
+  var BUILD = "milo-v27";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -73,6 +76,9 @@ var TRAINING = (function () {
   var BY_QUICK = QUICK_GROUPS;
   var CATALOGUE = GYM_EXERCISES;
   var RETIRED_IDS = GYM_RETIRED;
+  var SPLIT_TABLE = SPLITS;
+  var SPLIT_SIDES = SPLIT_SIDE;
+  var START = GROUP_DEFAULTS;
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
@@ -1979,6 +1985,208 @@ var TRAINING = (function () {
     return out;
   }
 
+  /* ---------- The plan: a weekly split ---------- */
+
+  // A split (data.js, SPLITS) is a rotation of days. Only its name is
+  // stored (state.routine.split) — and, for today alone, a day chosen by
+  // hand (state.routine.override). Everything else is worked out from the
+  // log each time: which day of the rotation each training date was, so
+  // which day comes next, and what that day holds — what its last sessions
+  // had. Skip a day, train out of order, change an exercise: the plan
+  // follows what was done, and there is nothing to keep in step.
+
+  // How many calendar days back the plan looks.
+  var PLAN_LOOKBACK = 120;
+  // A day of the plan lists what its last this-many sessions had: an
+  // exercise left out once (no time, machine taken) is still there next time.
+  var PLAN_SESSIONS = 2;
+
+  function splitDef(id) {
+    var d = (typeof id === "string" && own(SPLIT_TABLE, id)) ? SPLIT_TABLE[id] : null;
+    return (d && Array.isArray(d.days) && d.days.length) ? d : null;
+  }
+
+  // The splits there are, for Settings: [{ id, name, days: [day names] }].
+  function splits() {
+    return Object.keys(SPLIT_TABLE).filter(splitDef).map(function (id) {
+      return { id: id, name: String(SPLIT_TABLE[id].name), days: SPLIT_TABLE[id].days.map(function (d) { return String(d.name); }) };
+    });
+  }
+
+  // The groups a day reaches: its own, and on a push or pull day the two
+  // it shares.
+  function dayGroupsOf(day) {
+    var list = Array.isArray(day.groups) ? day.groups.filter(isGroup) : [];
+    if (day.side) ["shoulders", "arms"].forEach(function (g) { if (list.indexOf(g) === -1) list.push(g); });
+    return list;
+  }
+
+  // Whether an exercise belongs to a day of a split: its own group is one of
+  // the day's, or the day is a push / pull day and the exercise is a
+  // shoulder or arm one of that side (one that has no side counts on both).
+  function dayHas(day, ex) {
+    if (!ex || !isGroup(ex.p) || !Array.isArray(day.groups)) return false;
+    if (day.groups.indexOf(ex.p) !== -1) return true;
+    if (!day.side || (ex.p !== "shoulders" && ex.p !== "arms")) return false;
+    return !own(SPLIT_SIDES, ex.id) || SPLIT_SIDES[ex.id] === day.side;
+  }
+
+  // What a day starts from before it has a history: its `start` list, or its
+  // groups' defaults — the ones that exist, aren't retired and belong to it.
+  function startList(day) {
+    var ids = Array.isArray(day.start) ? day.start
+      : [].concat.apply([], (Array.isArray(day.groups) ? day.groups : []).map(function (g) { return own(START, g) ? START[g] : []; }));
+    var seen = dict();
+    return ids.filter(function (id) {
+      var ex = exRec(id);
+      if (!ex || ex.del || ex.retired || seen[id] || !dayHas(day, ex)) return false;
+      seen[id] = true;
+      return true;
+    });
+  }
+
+  // Today in the plan. null for a split nobody knows (also "off" and the
+  // skill rotations, which aren't in SPLITS) or a now that isn't a time.
+  //   { id, name, index, source, days, items, done }
+  //   index   which day of the rotation today is (0 first), and
+  //   source  how that was decided:
+  //             "override"  chosen by hand for today (override = { d: today's
+  //                         "YYYY-MM-DD", day } — yesterday's choice is ignored)
+  //             "today"     what was logged today is that day's work
+  //             "next"      the day after the last one trained
+  //             "first"     nothing to go by yet: day 1
+  //   days    the rotation: [{ name, groups, last, exercises }]
+  //             last       when that day was last trained before today (ms), or null
+  //             exercises  what it holds (exercise ids), see below
+  //   items   today's exercises: [{ exId, sets, done, complete }]
+  //             sets      the counted sets that exercise had last time (3 if never)
+  //             done      its counted sets today
+  //             complete  done ≥ sets
+  //   done    every item is complete (and there is one)
+  //
+  // Which day a date was: the day whose exercises got the most counted sets
+  // that date (quick gym logs count by group); between days that tie — Push
+  // twice in a six-day Push / Pull / Legs — the first one after the day
+  // before it, so a rotation keeps turning. Dates that fit no day (a skills
+  // session, a weigh-in) are passed over; the last PLAN_LOOKBACK days count.
+  //
+  // What a day holds: the exercises of its last PLAN_SESSIONS sessions that
+  // belong to it (dayHas), the latest session's first and in the order done;
+  // then, for any of its groups that leaves empty, the starting list for
+  // that group. Today's own list also takes what was logged today and
+  // belongs. Exercises removed from the list or retired are left out.
+  //
+  // x: the index of the same log, if one is at hand (gymIndex).
+  function splitState(log, now, splitId, override, x) {
+    var def = splitDef(splitId);
+    if (!def || !validTime(now)) return null;
+    var days = def.days, n = days.length, t = Number(now);
+    var todayKey = dateStr(t), end = nextDay(t), from = addDays(startOfDay(t), -PLAN_LOOKBACK).getTime();
+    var idx = asIndex(x === undefined || x === null ? log : x);
+
+    // The training dates in reach: each exercise's counted sets, and the
+    // sets a quick gym log gave each group.
+    var dates = dict();
+    var dateOf = function (ts) {
+      var k = dateStr(ts), d = dates[k] || (dates[k] = { key: k, ts: ts, ex: [], quick: null });
+      if (ts > d.ts) d.ts = ts;
+      return d;
+    };
+    Object.keys(idx.byEx).forEach(function (exId) {
+      var list = idx.byEx[exId].days;
+      for (var k = list.length - 1; k >= 0 && list[k].ts >= from; k--) {
+        if (list[k].ts < end) dateOf(list[k].ts).ex.push({ exId: exId, n: list[k].n, ts: list[k].ts });
+      }
+    });
+    (Array.isArray(log) ? log : []).forEach(function (e) {
+      var ts = timeOf(e);
+      if (!(ts >= from && ts < end) || e.kind !== "quick") return;
+      var d = dateOf(ts);
+      quickLines(e).forEach(function (q) {
+        d.quick = d.quick || zeros();
+        d.quick[q.group] += q.sets;
+      });
+    });
+    var keys = Object.keys(dates).sort();
+    keys.forEach(function (k) {
+      dates[k].ex.sort(function (a, b) { return (a.ts - b.ts) || cmpStr(a.exId, b.exId); });
+    });
+
+    var score = function (date, day) {
+      var sum = 0, reach = dayGroupsOf(day);
+      date.ex.forEach(function (it) { if (dayHas(day, exRec(it.exId))) sum += it.n; });
+      if (date.quick) reach.forEach(function (g) { sum += date.quick[g]; });
+      return sum;
+    };
+    // The day of the rotation a date was, given the day before it; −1 for none.
+    var dayOf = function (date, pointer) {
+      var best = 0, scores = days.map(function (day) { var v = score(date, day); if (v > best) best = v; return v; });
+      if (!(best > 0)) return -1;
+      for (var k = 1; k <= n; k++) {
+        var i = (pointer + k) % n;
+        if (scores[i] === best) return i;
+      }
+      return -1;
+    };
+
+    var pointer = -1, seen = days.map(function () { return []; }), todayDate = null;
+    keys.forEach(function (k) {
+      if (k === todayKey) { todayDate = dates[k]; return; }
+      var i = dayOf(dates[k], pointer);
+      if (i === -1) return;
+      pointer = i;
+      seen[i].push(dates[k]);
+    });
+
+    var index = (pointer + 1) % n, source = pointer === -1 ? "first" : "next";
+    var fits = todayDate ? dayOf(todayDate, pointer) : -1;
+    if (fits !== -1) { index = fits; source = "today"; }
+    if (override && typeof override === "object" && override.d === todayKey) {
+      var chosen = (override.day === null || typeof override.day === "boolean") ? NaN : Math.round(Number(override.day));
+      if (chosen >= 0 && chosen < n) { index = chosen; source = "override"; }
+    }
+
+    var holds = function (i) {
+      var day = days[i], out = [], has = dict();
+      var add = function (exId) {
+        var ex = exRec(exId);
+        if (has[exId] || !ex || ex.del || ex.retired || !dayHas(day, ex)) return;
+        has[exId] = true;
+        out.push(exId);
+      };
+      seen[i].slice(-PLAN_SESSIONS).reverse().forEach(function (date) { date.ex.forEach(function (it) { add(it.exId); }); });
+      if (i === index && todayDate) todayDate.ex.forEach(function (it) { add(it.exId); });
+      var start = startList(day);
+      // No history at all: the starting list as it is written (its order
+      // is the order to do it in). Else only what a whole group is missing.
+      if (!out.length) start.forEach(add);
+      else dayGroupsOf(day).forEach(function (g) {
+        if (out.some(function (id) { return exRec(id).p === g; })) return;
+        start.forEach(function (id) { if (exRec(id).p === g) add(id); });
+      });
+      return out;
+    };
+
+    var rotation = days.map(function (day, i) {
+      var last = seen[i].length ? seen[i][seen[i].length - 1].ts : null;
+      return { name: String(day.name), groups: dayGroupsOf(day), last: last, exercises: holds(i) };
+    });
+    var items = rotation[index].exercises.map(function (exId) {
+      var list = own(idx.byEx, exId) ? idx.byEx[exId].days : [], sets = DEFAULT_SETS, done = 0;
+      for (var k = list.length - 1; k >= 0; k--) {
+        if (list[k].ts >= end) continue;
+        if (list[k].day === todayKey) { done = list[k].n; continue; }
+        sets = Math.max(1, Math.min(MAX_SETS, list[k].n));
+        break;
+      }
+      return { exId: exId, sets: sets, done: done, complete: done >= sets };
+    });
+    return {
+      id: splitId, name: String(def.name), index: index, source: source, days: rotation, items: items,
+      done: items.length > 0 && items.every(function (it) { return it.complete; })
+    };
+  }
+
   /* ---------- Body weight ---------- */
 
   // What a weigh-in can hold (model.js, sanitizeBody).
@@ -2242,6 +2450,10 @@ var TRAINING = (function () {
     lifts: lifts,
     progress: progress,
     strength: strength,
+    splits: splits,
+    splitState: splitState,
+    PLAN_LOOKBACK: PLAN_LOOKBACK,
+    PLAN_SESSIONS: PLAN_SESSIONS,
     bodyWeight: bodyWeight,
     chartScale: chartScale,
     lastTrainedAll: lastTrainedAll,
