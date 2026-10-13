@@ -2167,3 +2167,7 @@ p.lc-cap { margin: 6px 2px 0; font-size: 0.8rem; color: var(--muted); line-heigh
 .circuitpane .secsrow { margin-top: 10px; }
 .secsfree { font-size: 0.84rem; color: var(--muted); text-align: right; }
 .circuitpane .hint { margin: 10px 2px 0; }
+
+/* ---------- Gym or bodyweight: the switch on Today's plan ---------- */
+.plancard .planmode { margin: 0 0 12px; }
+.plancard .planmode .chip { min-height: 36px; }

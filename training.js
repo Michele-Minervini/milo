@@ -35,7 +35,8 @@
 
    Reads the tables in data.js (AREAS, GROUP_INFO, AREA_GROUPS,
    VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED, SPLITS,
-   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES) and the
+   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES, BODYWEIGHT_DEFAULTS,
+   SKILL_SIDE) and the
    calendar-day helpers and sanitizeExercise in model.js, so it
    loads after both and before app.js.
 
@@ -57,7 +58,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v29";
+  var BUILD = "milo-v30";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -80,6 +81,8 @@ var TRAINING = (function () {
   var SPLIT_SIDES = SPLIT_SIDE;
   var START = GROUP_DEFAULTS;
   var CIRCUITS = GYM_CIRCUITS;
+  var BODY_START = BODYWEIGHT_DEFAULTS;
+  var SKILL_SIDES = SKILL_SIDE;
   var SIDED = GYM_SIDES;
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -2073,9 +2076,60 @@ var TRAINING = (function () {
     });
   }
 
+  // The side of a push / pull split an exercise is on: its own (SPLIT_SIDE),
+  // else what its group says — chest pushes, back pulls — else none.
+  function sideOf(ex) {
+    if (own(SPLIT_SIDES, ex.id)) return SPLIT_SIDES[ex.id];
+    return ex.p === "chest" ? "push" : (ex.p === "back" ? "pull" : null);
+  }
+
+  // What a day starts from in bodyweight mode: the bodyweight exercises
+  // listed for its groups (data.js, BODYWEIGHT_DEFAULTS) that exist, aren't
+  // retired, and on a push or pull day are of that side.
+  function bodyStart(day) {
+    var out = [], has = dict();
+    dayGroupsOf(day).forEach(function (g) {
+      (own(BODY_START, g) && Array.isArray(BODY_START[g]) ? BODY_START[g] : []).forEach(function (id) {
+        var ex = exRec(id);
+        if (!ex || has[id] || ex.del || ex.retired || ex.equip !== "bodyweight") return;
+        if (day.side && sideOf(ex) && sideOf(ex) !== day.side) return;
+        has[id] = true;
+        out.push(id);
+      });
+    });
+    return out;
+  }
+
+  // Whether an exercise's sets count towards a day: it belongs to it
+  // (dayHas), or it is one of the day's bodyweight exercises (bodyStart: the
+  // chin-up counts for an arms day as well as for a back day).
+  function dayCounts(day, ex) {
+    if (!ex) return false;
+    return dayHas(day, ex) || (ex.equip === "bodyweight" && bodyStart(day).indexOf(ex.id) !== -1);
+  }
+
+  // Whether a skill set whose main group is `group` counts towards a day.
+  function dayHasSkill(day, group, areaId) {
+    if (!isGroup(group) || !Array.isArray(day.groups)) return false;
+    if (day.groups.indexOf(group) !== -1) return true;
+    if (!day.side || (group !== "shoulders" && group !== "arms")) return false;
+    return !own(SKILL_SIDES, areaId) || SKILL_SIDES[areaId] === day.side;
+  }
+
+  // The skills a day trains: the ladders whose main group, at the step you
+  // are on (areas: state.areas; step 1 where that says nothing), is one of
+  // the day's. In AREAS order.
+  function daySkills(day, areas) {
+    return AREA_LIST.filter(function (a) {
+      var st = areas && typeof areas === "object" && own(areas, a.id) && areas[a.id] ? Math.round(Number(areas[a.id].step)) : 1;
+      var top = topGroups(setWeights(a.id, st >= 1 ? st : 1, ""));
+      return top.length > 0 && dayHasSkill(day, top[0], a.id);
+    }).map(function (a) { return a.id; });
+  }
+
   // Today in the plan. null for a split nobody knows (also "off" and the
   // skill rotations, which aren't in SPLITS) or a now that isn't a time.
-  //   { id, name, index, source, days, items, done }
+  //   { id, name, mode, index, source, days, items, skills, done }
   //   index   which day of the rotation today is (0 first), and
   //   source  how that was decided:
   //             "override"  chosen by hand for today (override = { d: today's
@@ -2083,40 +2137,58 @@ var TRAINING = (function () {
   //             "today"     what was logged today is that day's work
   //             "next"      the day after the last one trained
   //             "first"     nothing to go by yet: day 1
-  //   days    the rotation: [{ name, groups, last, exercises }]
+  //   mode    "gym", or "body": bodyweight mode (opts.mode "body")
+  //   days    the rotation: [{ name, groups, last, exercises, skills }]
   //             last       when that day was last trained before today (ms), or null
   //             exercises  what it holds (exercise ids), see below
+  //             skills     bodyweight mode: the ladders it trains (area ids); else []
   //   items   today's exercises: [{ exId, sets, done, complete }]
   //             sets      the counted sets that exercise had last time (3 if never)
   //             done      its counted sets today
   //             complete  done ≥ sets
-  //   done    every item is complete (and there is one)
+  //   skills  today's skills, bodyweight mode: [{ areaId, done, complete }]
+  //             done      the sets logged for that ladder today
+  //             complete  done > 0
+  //   done    every item and every skill is complete (and there is one)
   //
-  // Which day a date was: the day whose exercises got the most counted sets
-  // that date (quick gym logs count by group); between days that tie — Push
-  // twice in a six-day Push / Pull / Legs — the first one after the day
-  // before it, so a rotation keeps turning. Dates that fit no day (a skills
-  // session, a weigh-in) are passed over; the last PLAN_LOOKBACK days count.
+  // Which day a date was: the day whose work got the most counted sets that
+  // date — its exercises (dayCounts), quick gym logs by group, and skill
+  // sets by the group they are for; between days that tie — Push twice in a
+  // six-day Push / Pull / Legs — the first one after the day before it, so a
+  // rotation keeps turning. That is the same in both modes: the log decides,
+  // so switching mode never moves the day. Dates that fit no day (a
+  // weigh-in) are passed over; the last PLAN_LOOKBACK days count.
   //
   // What a day holds: the exercises of its last PLAN_SESSIONS sessions that
-  // belong to it (dayHas), the latest session's first and in the order done;
-  // then, for any of its groups that leaves empty, the starting list for
-  // that group. Today's own list also takes what was logged today and
-  // belongs. Exercises removed from the list or retired are left out.
+  // belong to it (dayHas), the latest session's first and in the order done
+  // — sessions that had none of them, a day done with skills or a quick log
+  // alone, are passed over; then, for any of its groups that leaves empty,
+  // the starting list for that group. Today's own list then also takes what
+  // was logged today and belongs. Exercises removed from the list or retired
+  // are left out. In bodyweight mode the same, with only bodyweight
+  // exercises (the day's own and those of bodyStart) and its own starting
+  // list. A session that used equipment for the day's work is gym mode's,
+  // one that used none is bodyweight mode's (and gym mode's too, for a day
+  // that never uses any) — so each mode keeps its list while the other is
+  // in use.
   //
   // x: the index of the same log, if one is at hand (gymIndex).
-  function splitState(log, now, splitId, override, x) {
+  // opts: { mode: "body", areas: state.areas } for bodyweight mode.
+  function splitState(log, now, splitId, override, x, opts) {
     var def = splitDef(splitId);
     if (!def || !validTime(now)) return null;
+    var o = (opts && typeof opts === "object") ? opts : {};
+    var body = o.mode === "body";
     var days = def.days, n = days.length, t = Number(now);
     var todayKey = dateStr(t), end = nextDay(t), from = addDays(startOfDay(t), -PLAN_LOOKBACK).getTime();
     var idx = asIndex(x === undefined || x === null ? log : x);
 
-    // The training dates in reach: each exercise's counted sets, and the
-    // sets a quick gym log gave each group.
+    // The training dates in reach: each exercise's counted sets, the sets a
+    // quick gym log gave each group, and each skill session's sets with the
+    // group they are for.
     var dates = dict();
     var dateOf = function (ts) {
-      var k = dateStr(ts), d = dates[k] || (dates[k] = { key: k, ts: ts, ex: [], quick: null });
+      var k = dateStr(ts), d = dates[k] || (dates[k] = { key: k, ts: ts, ex: [], quick: null, skill: [] });
       if (ts > d.ts) d.ts = ts;
       return d;
     };
@@ -2128,7 +2200,13 @@ var TRAINING = (function () {
     });
     (Array.isArray(log) ? log : []).forEach(function (e) {
       var ts = timeOf(e);
-      if (!(ts >= from && ts < end) || e.kind !== "quick") return;
+      if (!(ts >= from && ts < end)) return;
+      if (e.kind === undefined && typeof e.areaId === "string") {
+        var sets = hardSets(e), top = topGroups(setWeights(e.areaId, e.step, e.variant));
+        if (sets > 0 && top.length) dateOf(ts).skill.push({ areaId: e.areaId, group: top[0], n: sets });
+        return;
+      }
+      if (e.kind !== "quick") return;
       var d = dateOf(ts);
       quickLines(e).forEach(function (q) {
         d.quick = d.quick || zeros();
@@ -2142,8 +2220,9 @@ var TRAINING = (function () {
 
     var score = function (date, day) {
       var sum = 0, reach = dayGroupsOf(day);
-      date.ex.forEach(function (it) { if (dayHas(day, exRec(it.exId))) sum += it.n; });
+      date.ex.forEach(function (it) { if (dayCounts(day, exRec(it.exId))) sum += it.n; });
       if (date.quick) reach.forEach(function (g) { sum += date.quick[g]; });
+      date.skill.forEach(function (sk) { if (dayHasSkill(day, sk.group, sk.areaId)) sum += sk.n; });
       return sum;
     };
     // The day of the rotation a date was, given the day before it; −1 for none.
@@ -2174,17 +2253,37 @@ var TRAINING = (function () {
       if (chosen >= 0 && chosen < n) { index = chosen; source = "override"; }
     }
 
+    // What a day's list may hold, in the mode asked for.
+    var belongs = function (day, exId) {
+      var ex = exRec(exId);
+      if (!ex || ex.del || ex.retired) return false;
+      return body ? ex.equip === "bodyweight" && dayCounts(day, ex) : dayHas(day, ex);
+    };
     var holds = function (i) {
       var day = days[i], out = [], has = dict();
       var add = function (exId) {
-        var ex = exRec(exId);
-        if (has[exId] || !ex || ex.del || ex.retired || !dayHas(day, ex)) return;
+        if (has[exId] || !belongs(day, exId)) return;
         has[exId] = true;
         out.push(exId);
       };
-      seen[i].slice(-PLAN_SESSIONS).reverse().forEach(function (date) { date.ex.forEach(function (it) { add(it.exId); }); });
-      if (i === index && todayDate) todayDate.ex.forEach(function (it) { add(it.exId); });
-      var start = startList(day);
+      var mine = function (date) { return date.ex.some(function (it) { return belongs(day, it.exId); }); };
+      // A session that used equipment for this day's work is the gym's; one
+      // that used none is bodyweight mode's. So each mode goes by its own
+      // sessions, and a week away from the gym doesn't crowd the gym's
+      // exercises out, nor two push-up sets after the bench decide what a
+      // bodyweight chest day is. A day never trained with equipment (abs on
+      // the floor) is the same in both: gym mode then goes by every session.
+      var geared = function (date) {
+        return date.ex.some(function (it) {
+          var ex = exRec(it.exId);
+          return !!ex && !ex.del && !ex.retired && ex.equip !== "bodyweight" && dayHas(day, ex);
+        });
+      };
+      var sessions = seen[i].filter(mine);
+      if (body) sessions = sessions.filter(function (date) { return !geared(date); });
+      else if (sessions.some(geared)) sessions = sessions.filter(geared);
+      sessions.slice(-PLAN_SESSIONS).reverse().forEach(function (date) { date.ex.forEach(function (it) { add(it.exId); }); });
+      var start = body ? bodyStart(day) : startList(day);
       // No history at all: the starting list as it is written (its order
       // is the order to do it in). Else only what a whole group is missing.
       if (!out.length) start.forEach(add);
@@ -2192,20 +2291,32 @@ var TRAINING = (function () {
         if (out.some(function (id) { return exRec(id).p === g; })) return;
         start.forEach(function (id) { if (exRec(id).p === g) add(id); });
       });
+      // Then what was logged today and isn't on it yet. After the starting
+      // list, not instead of it: a day with no history keeps its list once
+      // the first exercise is logged.
+      if (i === index && todayDate) todayDate.ex.forEach(function (it) { add(it.exId); });
       return out;
     };
 
     var rotation = days.map(function (day, i) {
       var last = seen[i].length ? seen[i][seen[i].length - 1].ts : null;
-      return { name: String(day.name), groups: dayGroupsOf(day), last: last, exercises: holds(i) };
+      return { name: String(day.name), groups: dayGroupsOf(day), last: last, exercises: holds(i), skills: body ? daySkills(day, o.areas) : [] };
     });
+    var setsToday = dict();
+    if (todayDate) todayDate.skill.forEach(function (sk) { setsToday[sk.areaId] = (setsToday[sk.areaId] || 0) + sk.n; });
+    var skills = rotation[index].skills.map(function (areaId) {
+      var did = setsToday[areaId] || 0;
+      return { areaId: areaId, done: did, complete: did > 0 };
+    });
+    var isDone = function (it) { return it.complete; };
     var items = rotation[index].exercises.map(function (exId) {
       var it = setsOn(idx, exId, todayKey, end);
       return { exId: exId, sets: it.sets, done: it.done, complete: it.done >= it.sets };
     });
     return {
-      id: splitId, name: String(def.name), index: index, source: source, days: rotation, items: items,
-      done: items.length > 0 && items.every(function (it) { return it.complete; })
+      id: splitId, name: String(def.name), mode: body ? "body" : "gym", index: index, source: source,
+      days: rotation, items: items, skills: skills,
+      done: items.length + skills.length > 0 && items.every(isDone) && skills.every(isDone)
     };
   }
 

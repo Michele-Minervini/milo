@@ -1229,10 +1229,10 @@ section("gym exercises: the catalogue, your own, and tweaks");
   eq("a load type this version doesn't know → known false", [T.exercise("x_band").load, T.exercise("x_band").known], ["band", false]);
   const l2 = T.exerciseList();
   eq("the list: built-in + your own, not the deleted one", [l2.length, l2.some(x => x.id === "x_old")], [LISTED.length + 3, false]);
-  eq("…legs by name, Sled push at the end", l2.filter(x => x.p === "legs").map(x => x.name).slice(-3), ["Leg press", "Romanian deadlift", "Sled push"]);
+  eq("…legs by name, Sled push among them", l2.filter(x => x.p === "legs").map(x => x.name).slice(-4), ["Romanian deadlift", "Single-leg calf raise", "Sled push", "Wall sit"]);
   eq("…the one without a group comes last", l2[l2.length - 1].id, "x_grip");
   eq("…Band pull-apart among shoulders, by name", l2.filter(x => x.p === "shoulders").map(x => x.id),
-    ["x_band", "lateral_cable", "lateral_db", "face_pull", "ohp_bb", "rear_fly_db", "ohp_db"]);
+    ["x_band", "lateral_cable", "lateral_db", "face_pull", "ohp_bb", "pushup_pike", "rear_fly_db", "ohp_db"]);
   T.useExercises([BAND, ARNOLD]);
   eq("…names sort ignoring case (\"arnold press\" before \"Band pull-apart\")", T.exerciseList().filter(x => x.p === "shoulders").map(x => x.id).slice(0, 3),
     ["x_arnold", "x_band", "lateral_cable"]);

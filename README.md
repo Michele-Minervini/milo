@@ -21,8 +21,8 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   at a glance: which days you trained (a dot per muscle group) and six bars of
   hard sets per group against their weekly targets.
 - **A weekly plan for the gym.** In Settings → Weekly plan, pick a split:
-  **5 days** (legs · back + shoulders · chest · arms · abs), **6 days** (the
-  same with back and shoulders on days of their own) or **Push / Pull / Legs**
+  **5 days** (legs · back + shoulders · chest · arms · abs), **6 days**
+  (shoulders · chest · back · arms · legs · abs) or **Push / Pull / Legs**
   (each twice a week). Today then shows the day you are on, its exercises —
   each with its sets, its rep range and the weight to use — and about how
   long it takes. Nothing about the plan is stored except the split's name:
@@ -35,6 +35,18 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   one. In a gym exercise, **Save →** goes to the plan's next exercise that
   still has sets to do — round after round if you do one set of each, which
   is how a circuit is logged.
+- **Gym or Bodyweight.** Today's plan has a switch for when you are away from
+  a gym. **Bodyweight** keeps the split and the day you are on, and lists what
+  needs no equipment: the skills whose main muscle group is one of the day's,
+  at the step you are on (the guided session walks you through them), then
+  bodyweight exercises — the ones you did on that day's last two sessions
+  without equipment, or a starting list (push-ups, pull-ups, dips, pike
+  push-ups, lunges, calf raises, a wall sit…). A session that used equipment
+  belongs to gym mode and one that used none to bodyweight mode, so each
+  keeps its own list and your gym exercises are there when you switch back.
+  Which day a date was is the same in both modes — skill sessions count for
+  the day they train — so switching never moves the day. The mode is saved
+  and synced.
 - **Body.** This week's hard sets for chest, back, shoulders, arms, abs and legs
   — Monday to Sunday, against a target of 10–20 sets (20–40 for arms and legs,
   which are several muscles each; change it in Settings) — with where an even

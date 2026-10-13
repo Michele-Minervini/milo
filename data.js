@@ -8,7 +8,7 @@
    ============================================================ */
 
 /* Build stamp: app.js refuses to run on files from two different releases. */
-const DATA_BUILD = "milo-v29";
+const DATA_BUILD = "milo-v30";
 
 const AREAS = [
   {
@@ -1329,6 +1329,8 @@ const GYM_EXERCISES = [
   { id: "lateral_cable", name: "Cable lateral raise",        p: "shoulders", s: [],                    equip: "cable",      lo: 10, hi: 15, inc: 2.5, perHand: false, load: "ext",    timed: false },
   { id: "rear_fly_db",   name: "Rear-delt fly",              p: "shoulders", s: [],                    equip: "dumbbell",   lo: 10, hi: 15, inc: 2,   perHand: true,  load: "ext",    timed: false },
   { id: "face_pull",     name: "Face pull",                  p: "shoulders", s: ["back"],              equip: "cable",      lo: 10, hi: 15, inc: 2.5, perHand: false, load: "ext",    timed: false },
+  // Hips high, head towards the floor: the push-up that loads the shoulders.
+  { id: "pushup_pike",   name: "Pike push-up",               p: "shoulders", s: ["arms"],              equip: "bodyweight", lo: 8,  hi: 15, inc: 2.5, perHand: false, load: "bw",     timed: false },
   // Arms
   { id: "curl_db",       name: "Dumbbell curl",              p: "arms",      s: [],                    equip: "dumbbell",   lo: 10, hi: 15, inc: 2,   perHand: true,  load: "ext",    timed: false },
   { id: "hammer_db",     name: "Hammer curl",                p: "arms",      s: [],                    equip: "dumbbell",   lo: 10, hi: 15, inc: 2,   perHand: true,  load: "ext",    timed: false },
@@ -1378,7 +1380,12 @@ const GYM_EXERCISES = [
   { id: "split_squat_db", name: "Dumbbell split squat",      p: "legs",      s: [],                    equip: "dumbbell",   lo: 8,  hi: 12, inc: 2,   perHand: true,  load: "ext",    timed: false },
   { id: "hip_thrust_bb", name: "Hip thrust",                 p: "legs",      s: [],                    equip: "barbell",    lo: 8,  hi: 12, inc: 2.5, perHand: false, load: "ext",    timed: false },
   { id: "calf_raise",    name: "Calf raise",                 p: "legs",      s: [],                    equip: "machine",    lo: 10, hi: 20, inc: 5,   perHand: false, load: "ext",    timed: false },
-  { id: "goblet_squat",  name: "Goblet squat",               p: "legs",      s: [],                    equip: "dumbbell",   lo: 8,  hi: 12, inc: 2,   perHand: false, load: "ext",    timed: false }
+  { id: "goblet_squat",  name: "Goblet squat",               p: "legs",      s: [],                    equip: "dumbbell",   lo: 8,  hi: 12, inc: 2,   perHand: false, load: "ext",    timed: false },
+  // Legs with no gym: the lunge and the calf raise count the reps of one
+  // side; the wall sit is held for time.
+  { id: "lunge_bw",      name: "Lunge, each side",           p: "legs",      s: [],                    equip: "bodyweight", lo: 10, hi: 20, inc: 2.5, perHand: false, load: "bw",     timed: false },
+  { id: "calf_raise_bw", name: "Single-leg calf raise",      p: "legs",      s: [],                    equip: "bodyweight", lo: 10, hi: 20, inc: 2.5, perHand: false, load: "bw",     timed: false },
+  { id: "wall_sit",      name: "Wall sit",                   p: "legs",      s: [],                    equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw",     timed: true }
 ];
 
 /* Exercises taken out of the picker. They stay in GYM_EXERCISES (their
@@ -1459,11 +1466,11 @@ const SPLITS = {
   six: {
     name: "6 days",
     days: [
-      { name: "Legs", groups: ["legs"] },
-      { name: "Back", groups: ["back"] },
       { name: "Shoulders", groups: ["shoulders"] },
       { name: "Chest", groups: ["chest"] },
+      { name: "Back", groups: ["back"] },
       { name: "Arms", groups: ["arms"] },
+      { name: "Legs", groups: ["legs"] },
       { name: "Abs", groups: ["abs"] }
     ]
   },
@@ -1484,8 +1491,34 @@ const SPLITS = {
    presses, side raises and triceps push; rear delts, biceps and forearms
    pull. One that isn't listed (an exercise of your own) counts on both. */
 const SPLIT_SIDE = {
-  ohp_bb: "push", ohp_db: "push", lateral_db: "push", lateral_cable: "push",
+  ohp_bb: "push", ohp_db: "push", lateral_db: "push", lateral_cable: "push", pushup_pike: "push",
   rear_fly_db: "pull", face_pull: "pull",
   pushdown: "push", oh_ext_cable: "push", skull_bb: "push", bench_dips: "push",
   curl_db: "pull", hammer_db: "pull", curl_bb: "pull", wrist_curl_db: "pull", wrist_curl_rev_db: "pull"
 };
+
+/* ---------- Bodyweight mode: the same split, without a gym ----------
+
+   state.routine.mode "body" turns the days of a gym split into bodyweight
+   days (training.js, splitState). A day then lists the skills (the ladders
+   of AREAS, at the step you are on) whose main group is one of its groups,
+   and the bodyweight exercises of the catalogue you did the last times on
+   that day — or, before there are any, the ones listed here for its groups.
+
+   An entry may be an exercise whose own group is another one, where it is
+   the bodyweight way to train this one (the close push-up and the chin-up,
+   for arms); such an exercise counts for both days. Every id is a
+   GYM_EXERCISES id with equip "bodyweight" that isn't retired, and this
+   group is its own or one it helps (tests/data-test.js). */
+const BODYWEIGHT_DEFAULTS = {
+  chest:     ["pushup_std", "pushup_decline", "dips"],
+  back:      ["pullup_std", "chinup_w"],
+  shoulders: ["pushup_pike"],
+  arms:      ["bench_dips", "pushup_close", "chinup_w"],
+  abs:       ["star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"],
+  legs:      ["lunge_bw", "calf_raise_bw", "wall_sit"]
+};
+
+/* Which side of a push / pull split a skill is on, for a skill whose main
+   group is shoulders or arms (one that isn't listed counts on both). */
+const SKILL_SIDE = { hspu: "push" };

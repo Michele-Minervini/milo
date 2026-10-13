@@ -39,7 +39,7 @@ section("the splits there are");
 {
   eq("three, each with its days in rotation order", T.splits(), [
     { id: "five", name: "5 days", days: ["Legs", "Back + Shoulders", "Chest", "Arms", "Abs"] },
-    { id: "six", name: "6 days", days: ["Legs", "Back", "Shoulders", "Chest", "Arms", "Abs"] },
+    { id: "six", name: "6 days", days: ["Shoulders", "Chest", "Back", "Arms", "Legs", "Abs"] },
     { id: "ppl6", name: "Push / Pull / Legs", days: ["Push", "Pull", "Legs", "Push", "Pull", "Legs"] }
   ]);
   eq("no plan for \"off\", a skills rotation, a split nobody knows, or a time that isn't one",
@@ -60,7 +60,7 @@ section("with nothing logged: day 1, from the starting lists");
   eq("today's exercises: 3 sets each, none done", st.items, st.days[0].exercises.map(exId => ({ exId, sets: 3, done: 0, complete: false })));
   eq("no day has been trained", st.days.map(d => d.last), [null, null, null, null, null]);
   eq("the six-day split keeps back and shoulders apart", S([], "six").days.map(d => d.name + ":" + d.groups.join("+")),
-    ["Legs:legs", "Back:back", "Shoulders:shoulders", "Chest:chest", "Arms:arms", "Abs:abs"]);
+    ["Shoulders:shoulders", "Chest:chest", "Back:back", "Arms:arms", "Legs:legs", "Abs:abs"]);
   eq("push / pull / legs: each push and pull day takes its side of shoulders and arms", S([], "ppl6").days.slice(0, 3).map(d => [d.name, d.groups, d.exercises]), [
     ["Push", ["chest", "shoulders", "arms"], ["bench_db", "ohp_db", "incline_db", "lateral_db", "pushdown", "oh_ext_cable"]],
     ["Pull", ["back", "shoulders", "arms"], ["pulldown", "row_cable", "row_db", "rear_fly_db", "curl_db", "hammer_db"]],
@@ -77,7 +77,8 @@ section("which day today is: the one after the last day trained");
     names(S([].concat(chest(O(8)), [G(O(8, 13), "curl_db", [10], 10)]))), "Arms");
   eq("…and warm-ups don't count towards it", names(S([].concat([G(O(8), "bench_db", [10, 10], 20, { warm: [1, 1] })], arms(O(8, 13))))), "Abs");
   eq("a quick gym log counts by its groups", names(S([Q(O(8), { legs: 6 })])), "Back + Shoulders");
-  eq("a skills session or a weigh-in is no day of the split", [names(S([].concat(legs(O(5)), [skill(O(6)), { id: "w", ts: O(7), kind: "body", kg: 72, waist: null, note: "", mts: 1 }]))), S([skill(O(6))]).source], ["Back + Shoulders", "first"]);
+  eq("a weigh-in is no day of the split", [names(S([].concat(legs(O(5)), [{ id: "w", ts: O(7), kind: "body", kg: 72, waist: null, note: "", mts: 1 }]))), S([{ id: "w", ts: O(7), kind: "body", kg: 72, waist: null, note: "", mts: 1 }]).source], ["Back + Shoulders", "first"]);
+  eq("a skills session is: push-ups are a chest day's work", [names(S([].concat(legs(O(5)), [skill(O(6))]))), S([skill(O(6))]).source], ["Arms", "next"]);
   eq("each day remembers when it was last trained", S([].concat(legs(O(5)), back(O(6)), legs(O(9)))).days.map(d => d.last), [O(9) + 60000, O(6) + 60000, null, null, null]);
   eq("only the last 120 days count: a session 121 days back is as good as none", [S(legs(M.addDays(M.startOfDay(NOW), -120).getTime() + 3600000)).source, S(legs(M.addDays(M.startOfDay(NOW), -121).getTime() + 3600000)).source], ["next", "first"]);
   eq("23:30 and 00:30 are two dates, so two days of the rotation", names(S([].concat(legs(O(6, 23, 30)), back(O(7, 0, 30))))), "Chest");
@@ -174,6 +175,132 @@ section("the same log, the same plan");
   const idx = T.gymIndex(big), t0 = Date.now();
   ["five", "six", "ppl6"].forEach(sp => T.splitState(big, NOW, sp, null, idx));
   check("3,000 entries: the three plans in well under a tenth of a second", Date.now() - t0 < 100, "took " + (Date.now() - t0) + " ms");
+}
+
+/* ---- The six-day split's order, skills in the rotation, bodyweight mode ---- */
+
+const SK = (ts, areaId, step, sets, variant) => ({ id: "b" + (++n), ts, date: M.dateStr(ts), areaId, step: step || 3, sets: sets || [10, 10], note: "", mts: ts, variant: variant || "" });
+// Steps: all at 5, where every ladder's main group is the usual one.
+const AT = step => ({ pushup: { step, std: 0 }, pullup: { step, std: 0 }, legraise: { step, std: 0 }, squat: { step, std: 0 }, bridge: { step, std: 0 }, hspu: { step, std: 0 } });
+const B = (log, split, ov, areas, now) => T.splitState(log, now || NOW, split || "five", ov === undefined ? null : ov, null, { mode: "body", areas: areas || AT(5) });
+
+section("the six-day split: shoulders, chest, back, arms, legs, abs");
+{
+  const six = S([], "six");
+  eq("starts on shoulders", [six.index, names(six)], [0, "Shoulders"]);
+  eq("each day follows the one before", [shoulders(O(5)), chest(O(5)), back(O(5)), arms(O(5)), legs(O(5)), abs(O(5))].map(d => names(S(d, "six"))),
+    ["Chest", "Back", "Arms", "Legs", "Abs", "Shoulders"]);
+  eq("a whole week in order comes round to shoulders", names(S([].concat(shoulders(O(5)), chest(O(6)), back(O(7)), arms(O(8)), legs(O(9)), abs(O(10))), "six")), "Shoulders");
+}
+
+section("skills count for the day they train, in either mode");
+{
+  eq("pull-ups after a legs day: back + shoulders is done, chest is next", names(S([].concat(legs(O(5)), [SK(O(6), "pullup")]))), "Chest");
+  eq("the most sets still decide: a chest day with one set of leg raises is a chest day", names(S([].concat(chest(O(8)), [SK(O(8, 13), "legraise", 3, [10])]))), "Arms");
+  eq("…and six sets of squats beat three of curls", names(S([SK(O(8), "squat", 3, [20, 20, 20, 20, 20, 20]), G(O(8, 13), "curl_db", [10, 10, 10], 10)])), "Back + Shoulders");
+  eq("a set that failed (0) is no set", S([SK(O(8), "squat", 3, [0, 0])]).source, "first");
+  eq("each ladder by its main group: push-ups chest, pull-ups and bridges back, leg raises abs, squats legs, handstand push-ups shoulders",
+    ["pushup", "pullup", "bridge", "legraise", "squat", "hspu"].map(a => names(S([SK(O(8), a, 5)], "six"))), ["Back", "Arms", "Arms", "Shoulders", "Abs", "Chest"]);
+  eq("by the step it was done at: short bridges (step 1) are legs work", names(S([SK(O(8), "bridge", 1)], "six")), "Abs");
+  eq("a variation by what it trains: a plank hold in the push-up ladder is abs work", names(S([SK(O(8), "pushup", 3, [40, 40], "Plank Hold")], "six")), "Shoulders");
+  eq("push / pull / legs: handstand push-ups push, pull-ups pull", [names(S([SK(O(8), "hspu", 5)], "ppl6")), names(S([SK(O(8), "pullup", 5)], "ppl6")), names(S([SK(O(8), "squat", 5)], "ppl6"))], ["Pull", "Legs", "Push"]);
+  eq("today's skill session is today's day", [S([].concat(legs(O(10)), [SK(NOW - 3600000, "pushup")])).source, names(S([].concat(legs(O(10)), [SK(NOW - 3600000, "pushup")])))], ["today", "Chest"]);
+  eq("gym mode lists no skills", [S([]).mode, S([]).skills, S([]).days.map(d => d.skills.length)], ["gym", [], [0, 0, 0, 0, 0]]);
+  eq("a day done with skills alone hands no exercises on: the gym list is still the last gym session's", S([].concat(chest(O(1)), [SK(O(6), "pushup"), SK(O(9), "pushup")])).days[2].exercises, ["bench_db", "incline_db"]);
+  eq("…and so is one logged with a quick gym log", S([].concat(chest(O(1)), [Q(O(6), { chest: 9 }), Q(O(9), { chest: 9 })])).days[2].exercises, ["bench_db", "incline_db"]);
+}
+
+section("bodyweight mode: the same day, without a gym");
+{
+  const st = B([]);
+  eq("the same split and day as gym mode, marked as bodyweight", [st.id, st.mode, st.index, st.source, st.days.map(d => d.name)], ["five", "body", 0, "first", ["Legs", "Back + Shoulders", "Chest", "Arms", "Abs"]]);
+  eq("each day's skills: the ladders whose main group is one of its groups", st.days.map(d => d.skills), [["squat"], ["pullup", "bridge", "hspu"], ["pushup"], [], ["legraise"]]);
+  eq("each day's exercises start from the bodyweight lists", st.days.map(d => d.exercises), [
+    ["lunge_bw", "calf_raise_bw", "wall_sit"],
+    ["pullup_std", "chinup_w", "pushup_pike"],
+    ["pushup_std", "pushup_decline", "dips"],
+    ["bench_dips", "pushup_close", "chinup_w"],
+    ["star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"]]);
+  eq("today: the day's skills to do, and its exercises at 3 sets", [st.skills, st.items.map(it => [it.exId, it.sets, it.done]), st.done],
+    [[{ areaId: "squat", done: 0, complete: false }], [["lunge_bw", 3, 0], ["calf_raise_bw", 3, 0], ["wall_sit", 3, 0]], false]);
+  eq("six days: one skill-led day each, arms from exercises alone", B([], "six").days.map(d => [d.name, d.skills, d.exercises.length]),
+    [["Shoulders", ["hspu"], 1], ["Chest", ["pushup"], 3], ["Back", ["pullup", "bridge"], 2], ["Arms", [], 3], ["Legs", ["squat"], 3], ["Abs", ["legraise"], 6]]);
+  eq("push / pull / legs: each side's skills and bodyweight exercises", B([], "ppl6").days.slice(0, 3).map(d => [d.name, d.skills, d.exercises]), [
+    ["Push", ["pushup", "hspu"], ["pushup_std", "pushup_decline", "dips", "pushup_pike", "bench_dips", "pushup_close"]],
+    ["Pull", ["pullup", "bridge"], ["pullup_std", "chinup_w"]],
+    ["Legs", ["legraise", "squat"], ["lunge_bw", "calf_raise_bw", "wall_sit", "star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"]]]);
+
+  eq("skills follow the step you are on: at step 1 the bridge is legs work, and the headstand counts for shoulders",
+    B([], "five", null, AT(1)).days.map(d => d.skills), [["squat", "bridge"], ["pullup", "hspu"], ["pushup"], [], ["legraise"]]);
+  eq("no steps to go by: as at step 1", [T.splitState([], NOW, "five", null, null, { mode: "body", areas: null }).days[0].skills, T.splitState([], NOW, "five", null, null, { mode: "body", areas: "junk" }).days[0].skills, T.splitState([], NOW, "five", null, null, { mode: "body" }).days[0].skills],
+    [["squat", "bridge"], ["squat", "bridge"], ["squat", "bridge"]]);
+
+  // The day is the log's: the same in both modes.
+  const gymWeek = [].concat(legs(O(5)), back(O(6)), shoulders(O(6, 13)), chest(O(7)));
+  eq("switching mode never moves the day", [names(S(gymWeek)), names(B(gymWeek)), S(gymWeek).index === B(gymWeek).index], ["Arms", "Arms", true]);
+  eq("gym exercises stay out of the bodyweight list: a day with gym history alone starts from the bodyweight list", B(gymWeek).days[2].exercises, ["pushup_std", "pushup_decline", "dips"]);
+  eq("…and the gym list is untouched by the mode", S(gymWeek).days[2].exercises, ["bench_db", "incline_db"]);
+  const mixed = [].concat(chest(O(1)), [G(O(1, 14), "pushup_wide", [15, 15], 0)], legs(O(2)));
+  eq("push-ups done after the bench are part of a gym session: the bodyweight list still starts from its own", B(mixed).days[2].exercises, ["pushup_std", "pushup_decline", "dips"]);
+  eq("…and they are on the gym list, as before", S(mixed).days[2].exercises, ["bench_db", "incline_db", "pushup_wide"]);
+  const pure = mixed.concat([G(O(6), "pushup_wide", [15, 15, 15], 0), G(O(6, 13), "dips", [8, 8], 0)]);
+  eq("a session with no equipment is a bodyweight one: what it had is the bodyweight list", [B(pure).days[2].exercises, S(pure).days[2].exercises], [["pushup_wide", "dips"], ["bench_db", "incline_db", "pushup_wide"]]);
+  eq("a day that never uses equipment is the same in both modes", [B([].concat(abs(O(1)))).days[4].exercises, S([].concat(abs(O(1)))).days[4].exercises], [["leg_lift", "plank"], ["leg_lift", "plank"]]);
+
+  // A week without a gym.
+  const home = [SK(O(5), "squat", 5, [20, 20]), G(O(5, 13), "lunge_bw", [12, 12, 12], 0), SK(O(6), "pullup", 5, [6, 6]), SK(O(6, 13), "hspu", 5, [5, 5]), G(O(6, 14), "pushup_pike", [10, 10], 0),
+    SK(O(7), "pushup", 5, [20, 20]), G(O(7, 13), "pushup_decline", [12, 12, 12], 0)];
+  const hw = B(home);
+  eq("a week of bodyweight days turns the rotation: legs, back + shoulders, chest → arms", [names(hw), hw.source], ["Arms", "next"]);
+  eq("each day lists what was done on it", [hw.days[0].exercises, hw.days[1].exercises, hw.days[2].exercises], [["lunge_bw"], ["pushup_pike", "pullup_std", "chinup_w"], ["pushup_decline"]]);
+  eq("an arms day has no skill, and starts from its three exercises", [hw.skills, hw.items.map(it => it.exId)], [[], ["bench_dips", "pushup_close", "chinup_w"]]);
+  eq("back in gym mode the gym lists are where they were left", S(gymWeek.concat(home.map(e => Object.assign({}, e, { ts: e.ts + 86400000 * 4, date: undefined })))).days[2].exercises, ["bench_db", "incline_db"]);
+
+  // Today, part done.
+  const arms1 = home.concat([G(NOW - 3600000, "bench_dips", [12, 12, 12], 0), G(NOW - 1800000, "pushup_close", [10], 0)]);
+  const a1 = B(arms1);
+  eq("today's arms work is an arms day, though close push-ups are a chest exercise too", [names(a1), a1.source], ["Arms", "today"]);
+  eq("…with its sets counted", a1.items.map(it => [it.exId, it.done, it.complete]), [["bench_dips", 3, true], ["pushup_close", 1, false], ["chinup_w", 0, false]]);
+  const legsToday = [SK(NOW - 3600000, "squat", 5, [20, 20])];
+  const l1 = B(legsToday);
+  eq("a skill is done once it has a set today", [names(l1), l1.skills, l1.done], ["Legs", [{ areaId: "squat", done: 2, complete: true }], false]);
+  const l2 = B(legsToday.concat(["lunge_bw", "calf_raise_bw", "wall_sit"].map((id, i) => G(NOW - 1800000 + i * 60000, id, [12, 12, 12], 0))));
+  eq("a day with no history keeps its starting list once the first exercise is logged, in gym mode too",
+    [B([G(NOW - 3600000, "calf_raise_bw", [15], 0)]).items.map(it => it.exId), S([G(NOW - 3600000, "leg_curl", [12], 30)]).items.map(it => [it.exId, it.done])],
+    [["lunge_bw", "calf_raise_bw", "wall_sit"], [["leg_press", 0], ["leg_curl", 1], ["bulgarian_db", 0], ["leg_ext", 0], ["calf_raise", 0]]]);
+  eq("…and something else logged today joins the end of it", S([G(NOW - 3600000, "squat_bb", [5], 40)]).items.map(it => it.exId), ["leg_press", "leg_curl", "bulgarian_db", "leg_ext", "calf_raise", "squat_bb"]);
+  eq("after two weeks without a gym, the gym list is still the gym's", S([].concat(chest(O(1)), [SK(O(5), "pushup", 5), G(O(5, 13), "pushup_decline", [12, 12], 0), SK(O(9), "pushup", 5), G(O(9, 13), "pushup_std", [20, 20], 0)])).days[2].exercises, ["bench_db", "incline_db"]);
+  eq("…while a day that never uses equipment keeps going by its latest sessions", S([].concat(abs(O(1)), [G(O(5), "leg_lift", [12, 12], 0), G(O(5, 13), "bicycle", [40, 40], 0)])).days[4].exercises, ["leg_lift", "bicycle", "plank"]);
+  eq("the day is done when every skill and every exercise is", [l2.done, B(["lunge_bw", "calf_raise_bw", "wall_sit"].map((id, i) => G(NOW - 1800000 + i * 60000, id, [12, 12, 12], 0))).done], [true, false]);
+  eq("an arms day with nothing but exercises is done when they are", B(home.concat(["bench_dips", "pushup_close", "chinup_w"].map((id, i) => G(NOW - 1800000 + i * 60000, id, [10, 10, 10], 0)))).done, true);
+  eq("a day picked by hand holds in bodyweight mode too", names(B(home, "five", { d: "2026-10-12", day: 4 })), "Abs");
+
+  // Removed and retired exercises, your own.
+  T.useExercises([{ id: "x_ring", name: "Ring row", group: "back", sec: ["arms"], equip: "bodyweight", load: "bw", timed: false, perHand: false, inc: 2.5, lo: 8, hi: 15, note: "", del: false, mts: 5 },
+    { id: "x_band", name: "Band curl", group: "arms", sec: [], equip: "other", load: "ext", timed: false, perHand: false, inc: 1, lo: 10, hi: 15, note: "", del: false, mts: 5 }]);
+  const own2 = [G(O(6), "x_ring", [10, 10, 10], 0), G(O(8), "x_band", [12, 12], 5)];
+  eq("one of your own joins the bodyweight list if it needs no equipment", [B(own2).days[1].exercises, B(own2).days[3].exercises], [["x_ring", "pushup_pike"], ["bench_dips", "pushup_close", "chinup_w"]]);
+  T.useExercises([]);
+
+  // The same from the same log.
+  const a = J(B(arms1));
+  check("the same from the same log in any order, with or without the index", J(B(shuffled(arms1))) === a && J(B(arms1.slice().reverse())) === a &&
+    J(T.splitState(arms1, NOW, "five", null, T.gymIndex(arms1), { mode: "body", areas: AT(5) })) === a);
+  const junk = [null, 7, "x", {}, { areaId: "pushup" }, { areaId: "pushup", ts: O(8), sets: "8" }, { areaId: "__proto__", ts: O(8), step: 3, sets: [8] }, { areaId: "pushup", ts: 1e300, step: 3, sets: [8] },
+    { areaId: "pushup", ts: O(8), step: "x", sets: [8, 8] }, { areaId: 7, ts: O(8), step: 3, sets: [8] }];
+  const threw = [];
+  [[], null, "log", junk, arms1.concat(junk)].forEach((lg, i) => ["five", "six", "ppl6", "off", null].forEach(sp =>
+    [undefined, null, "x", 7, {}, { mode: "body" }, { mode: "body", areas: null }, { mode: "body", areas: { pushup: null, squat: { step: "x" }, bridge: { step: -3 }, hspu: { step: 1e9 } } }, { mode: 5, areas: AT(5) }].forEach((op, k) => {
+      try { T.splitState(lg, NOW, sp, null, null, op); T.splitState(lg, NaN, sp, null, undefined, op); } catch (e) { threw.push(i + " " + String(sp) + " " + k + ": " + e.message); }
+    })));
+  check("nothing throws, for odd logs, steps and options", !threw.length, threw.slice(0, 3).join("\n       "));
+  eq("any other mode is gym mode", ["gym", "bw", "", null, 5].map(m => T.splitState([], NOW, "five", null, null, { mode: m, areas: AT(5) }).mode), ["gym", "gym", "gym", "gym", "gym"]);
+  const big = [];
+  for (let i = 0; i < 3000; i++) big.push(i % 3 ? G(M.addDays(M.startOfDay(NOW), -Math.floor(i / 6)).getTime() + (8 + i % 6) * 3600000, ["pushup_std", "pullup_std", "bench_dips", "leg_lift", "lunge_bw", "pushup_pike"][Math.floor(i / 6) % 6], [10, 10, 10], 0)
+    : SK(M.addDays(M.startOfDay(NOW), -Math.floor(i / 6)).getTime() + (8 + i % 6) * 3600000, ["pushup", "pullup", "squat", "legraise", "bridge", "hspu"][Math.floor(i / 6) % 6], 5));
+  const idx = T.gymIndex(big), t0 = Date.now();
+  ["five", "six", "ppl6"].forEach(sp => T.splitState(big, NOW, sp, null, idx, { mode: "body", areas: AT(5) }));
+  check("3,000 entries: the three bodyweight plans in well under a tenth of a second", Date.now() - t0 < 100, "took " + (Date.now() - t0) + " ms");
 }
 
 /* ---- Circuits: where a hands-free countdown goes after a set ---- */
