@@ -2113,3 +2113,48 @@ p.lc-cap { margin: 6px 2px 0; font-size: 0.8rem; color: var(--muted); line-heigh
 .wkhead .wkpick { min-height: 36px; padding: 4px 12px; font-size: 0.8rem; flex: none; margin-left: auto; }
 .planlinks { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px; }
 .planlinks .linkbtn { margin: 0; }
+
+/* ---------- The work clock: a countdown for a timed set ---------- */
+/* A play button in each set still to do, left of its tick. */
+.gpane-play .gset { grid-template-columns: 44px minmax(3rem, 1fr) auto 44px 44px; }
+.gplay {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0 0 0 2px;
+  border-radius: 12px;
+  border: 1.5px solid var(--area);
+  color: var(--area);
+  font-size: 0.95rem;
+}
+.gplay.none { border: 0; }
+.sheet-body p.ghf { margin: -4px 2px 4px 32px; }
+@media (max-width: 374px) {
+  .gpane-play .gset { grid-template-columns: 40px minmax(2.6rem, 1fr) 40px 40px; }
+  .gplay { width: 40px; height: 40px; }
+}
+/* The clock itself, in place of the sets while it runs: big enough to read
+   from the floor. */
+.sheet-body.wcpane { display: flex; flex-direction: column; justify-content: center; }
+.wc { text-align: center; padding: 8px 4px 16px; }
+.wc p { margin: 0; }
+.wc .wc-phase { font-size: 1.15rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+.wc .wc-time {
+  margin: 2px 0 12px;
+  font-size: clamp(5.5rem, 38vw, 10rem);
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.wc[data-k="work"] .wc-phase { color: var(--area); }
+.wc-bar { height: 10px; max-width: 22rem; margin: 0 auto 18px; border-radius: 999px; background: var(--grid); overflow: hidden; }
+.wc-bar span { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--muted); }
+.wc[data-k="work"] .wc-bar span { background: var(--area); }
+.wc .wc-set { font-size: 1.02rem; font-weight: 700; color: var(--ink); }
+.wc .wc-next { min-height: 2.9em; margin: 6px auto 0; max-width: 24rem; font-size: 0.92rem; line-height: 1.45; color: var(--ink-2); }
+.wc[data-k="rest"] .wc-next { font-size: 1.02rem; font-weight: 650; color: var(--ink); }
+.wc #wcSkip { margin-top: 10px; }
+.wc #wcSkip[hidden] { display: none; }
+.wc.paused .wc-time { opacity: 0.4; }

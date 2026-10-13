@@ -16,8 +16,8 @@
    gym exercises, whether they got harder this week and the
    group's strength trend, body weight, and the axis a line chart
    is drawn on. And the plan: which day of the weekly split today
-   is and what it holds. Data only: the words the app shows are
-   app.js's.
+   is and what it holds, and where a hands-free countdown goes
+   after a set. Data only: the words the app shows are app.js's.
 
    Pure functions over plain values: no DOM, no storage, and no
    clock — whoever needs "this week" passes the time in — so
@@ -35,7 +35,7 @@
 
    Reads the tables in data.js (AREAS, GROUP_INFO, AREA_GROUPS,
    VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED, SPLITS,
-   SPLIT_SIDE, GROUP_DEFAULTS) and the
+   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES, GYM_FIRST) and the
    calendar-day helpers and sanitizeExercise in model.js, so it
    loads after both and before app.js.
 
@@ -57,7 +57,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v27";
+  var BUILD = "milo-v28";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -79,6 +79,9 @@ var TRAINING = (function () {
   var SPLIT_TABLE = SPLITS;
   var SPLIT_SIDES = SPLIT_SIDE;
   var START = GROUP_DEFAULTS;
+  var CIRCUITS = GYM_CIRCUITS;
+  var SIDED = GYM_SIDES;
+  var FIRST_SECS = GYM_FIRST;
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
@@ -1344,6 +1347,14 @@ var TRAINING = (function () {
     return out;
   }
 
+  // What a first session aims for: the top of the range — or, for a timed
+  // exercise with a starting time of its own (data.js, GYM_FIRST), that
+  // time, kept inside the range (which may have been changed).
+  function firstTarget(ex) {
+    var t = ex.timed && own(FIRST_SECS, ex.id) ? Math.round(Number(FIRST_SECS[ex.id])) : NaN;
+    return t >= 1 ? Math.max(ex.lo, Math.min(ex.hi, t)) : ex.hi;
+  }
+
   // The double-progression suggestion for the next session of an exercise,
   // from its sessions on days before now's (today's entries and
   // opts.exclude, the entry being edited, left out; sessions without a
@@ -1356,7 +1367,8 @@ var TRAINING = (function () {
   // W is the last session's top weight (sessionTop). kind, checked in
   // this order:
   //   "first"   no earlier session, or ext with W = 0: kg null, 3 sets of
-  //             hi ("pick a weight you could lift about hi + 2 times")
+  //             hi ("pick a weight you could lift about hi + 2 times"); a
+  //             timed exercise with a starting time of its own: 3 of that
   //   "return"  more than 42 calendar days since the last session: 90 %
   //             of W rounded down to inc (never 0: then W); assisted: W +
   //             10 % rounded up to inc; reps mode: W. Targets lo.
@@ -1391,7 +1403,7 @@ var TRAINING = (function () {
       return { kind: kind, kg: kg, sets: n, targets: targets, from: last ? { id: last.id, ts: last.ts, kg: last.W, reps: last.at.slice() } : null };
     };
     var mode = weightMode(ex);
-    if (!last || (mode === "load" && ex.load === "ext" && !(last.W > 0))) return make("first", null, DEFAULT_SETS, fill(hi, DEFAULT_SETS));
+    if (!last || (mode === "load" && ex.load === "ext" && !(last.W > 0))) return make("first", null, DEFAULT_SETS, fill(last ? hi : firstTarget(ex), DEFAULT_SETS));
     var W = last.W;
     if (!(W > 0)) mode = "reps";   // added or assisted with no weight on: bodyweight
     var n = Math.max(1, Math.min(MAX_SETS, last.n));
@@ -2001,6 +2013,21 @@ var TRAINING = (function () {
   // exercise left out once (no time, machine taken) is still there next time.
   var PLAN_SESSIONS = 2;
 
+  // An exercise's sets for today, from an index: how many counted sets it
+  // had the last time before today (`had`: there was one; DEFAULT_SETS when
+  // there wasn't, never more than MAX_SETS), and how many today has so far.
+  function setsOn(idx, exId, todayKey, end) {
+    var list = own(idx.byEx, exId) ? idx.byEx[exId].days : [], sets = DEFAULT_SETS, done = 0, had = false;
+    for (var k = list.length - 1; k >= 0; k--) {
+      if (list[k].ts >= end) continue;
+      if (list[k].day === todayKey) { done = list[k].n; continue; }
+      sets = Math.max(1, Math.min(MAX_SETS, list[k].n));
+      had = true;
+      break;
+    }
+    return { sets: sets, done: done, had: had };
+  }
+
   function splitDef(id) {
     var d = (typeof id === "string" && own(SPLIT_TABLE, id)) ? SPLIT_TABLE[id] : null;
     return (d && Array.isArray(d.days) && d.days.length) ? d : null;
@@ -2172,19 +2199,68 @@ var TRAINING = (function () {
       return { name: String(day.name), groups: dayGroupsOf(day), last: last, exercises: holds(i) };
     });
     var items = rotation[index].exercises.map(function (exId) {
-      var list = own(idx.byEx, exId) ? idx.byEx[exId].days : [], sets = DEFAULT_SETS, done = 0;
-      for (var k = list.length - 1; k >= 0; k--) {
-        if (list[k].ts >= end) continue;
-        if (list[k].day === todayKey) { done = list[k].n; continue; }
-        sets = Math.max(1, Math.min(MAX_SETS, list[k].n));
-        break;
-      }
-      return { exId: exId, sets: sets, done: done, complete: done >= sets };
+      var it = setsOn(idx, exId, todayKey, end);
+      return { exId: exId, sets: it.sets, done: it.done, complete: it.done >= it.sets };
     });
     return {
       id: splitId, name: String(def.name), index: index, source: source, days: rotation, items: items,
       done: items.length > 0 && items.every(function (it) { return it.complete; })
     };
+  }
+
+  /* ---------- Circuits: where a hands-free countdown goes next ---------- */
+
+  // Whether a timed exercise's set is one side, then the other (data.js,
+  // GYM_SIDES): its seconds are per side.
+  function eachSide(exId) {
+    var ex = exRec(exId);
+    return !!ex && !!ex.timed && Array.isArray(SIDED) && SIDED.indexOf(exId) !== -1;
+  }
+
+  // The circuit an exercise is in (data.js, GYM_CIRCUITS): its exercises that
+  // can be done now — known, timed, not removed or retired — in order. null
+  // when it is in none, or would be alone in it.
+  function circuitOf(exId) {
+    var found = null;
+    if (!exRec(exId)) return null;
+    (Array.isArray(CIRCUITS) ? CIRCUITS : []).forEach(function (c) {
+      if (!found && Array.isArray(c) && c.indexOf(exId) !== -1) found = c;
+    });
+    if (!found) return null;
+    var has = dict();
+    var list = found.filter(function (id) {
+      var e = exRec(id);
+      if (!e || has[id] || !e.timed || e.del || e.retired) return false;
+      has[id] = true;
+      return true;
+    });
+    return list.length > 1 && list.indexOf(exId) !== -1 ? list : null;
+  }
+
+  // After a set of exId today, the set a hands-free countdown runs next:
+  //   { exId, set, sets, circuit }   set: its number today, of `sets`
+  // In a circuit: the next exercise of the round that still has sets to do,
+  // then round again from the top. Every exercise of a circuit gets the
+  // same number of sets: the most any of them had last time (DEFAULT_SETS
+  // before there is a last time). An exercise in no circuit: its own next
+  // set, while today has fewer than last time. null when nothing is left,
+  // for an exercise nobody knows, or a now that isn't a time. x: a log, or
+  // the index gymIndex() built from it.
+  function circuitNext(x, exId, now) {
+    if (!exRec(exId) || !validTime(now)) return null;
+    var idx = asIndex(x), t = Number(now), todayKey = dateStr(t), end = nextDay(t);
+    var ring = circuitOf(exId), circuit = !!ring;
+    if (!ring) ring = [exId];
+    var sets = ring.map(function (id) { return setsOn(idx, id, todayKey, end); });
+    var rounds = 0;
+    sets.forEach(function (s) { if (s.had && s.sets > rounds) rounds = s.sets; });
+    if (!rounds) rounds = DEFAULT_SETS;
+    var at = ring.indexOf(exId);
+    for (var k = 1; k <= ring.length; k++) {
+      var i = (at + k) % ring.length;
+      if (sets[i].done < rounds) return { exId: ring[i], set: sets[i].done + 1, sets: rounds, circuit: circuit };
+    }
+    return null;
   }
 
   /* ---------- Body weight ---------- */
@@ -2452,6 +2528,9 @@ var TRAINING = (function () {
     strength: strength,
     splits: splits,
     splitState: splitState,
+    eachSide: eachSide,
+    circuitOf: circuitOf,
+    circuitNext: circuitNext,
     PLAN_LOOKBACK: PLAN_LOOKBACK,
     PLAN_SESSIONS: PLAN_SESSIONS,
     bodyWeight: bodyWeight,

@@ -361,4 +361,27 @@ section("weekly splits");
   eq("the abs circuit rests 20 seconds", GROUP_DEFAULTS.abs.map(id => REST[id]), [20, 20, 20, 20, 20, 20]);
 }
 
+section("circuits, each-side exercises and first-time seconds");
+{
+  const CIRCUITS = page.get("GYM_CIRCUITS"), SIDES = page.get("GYM_SIDES"), FIRST = page.get("GYM_FIRST");
+  const eq = (name, got, want) => check(name, same(got, want), "expected " + J(want) + "\n       got      " + J(got));
+  const byId = id => GYM.find(e => e.id === id);
+  const usable = id => !!byId(id) && byId(id).timed === true && GYM_RETIRED.indexOf(id) === -1;
+  check("circuits: lists of 2 to 12 timed exercises of the catalogue, none retired",
+    Array.isArray(CIRCUITS) && CIRCUITS.length > 0 && Array.from(CIRCUITS).every(c => Array.isArray(c) && c.length >= 2 && c.length <= 12 && Array.from(c).every(usable)), J(CIRCUITS));
+  const members = [].concat.apply([], Array.from(CIRCUITS).map(c => Array.from(c)));
+  check("no exercise is in two circuits, or twice in one", new Set(members).size === members.length, members.join(", "));
+  eq("the abs circuit: the six, in the order they are done", Array.from(CIRCUITS[0]),
+    ["star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"]);
+  eq("…which is the Abs day's starting list", Array.from(CIRCUITS[0]), Array.from(GROUP_DEFAULTS.abs));
+  const REST = page.get("GYM_REST");
+  check("every exercise of a circuit has a rest of its own", members.every(id => Number.isInteger(REST[id])), members.filter(id => !Number.isInteger(REST[id])).join(", "));
+  check("each-side exercises: timed ones of the catalogue, none twice", Array.isArray(SIDES) && Array.from(SIDES).every(id => !!byId(id) && byId(id).timed === true) && new Set(SIDES).size === SIDES.length, J(SIDES));
+  eq("the two that are done a side at a time", Array.from(SIDES), ["star_crunch", "plank_knee_elbow"]);
+  check("…and their names say so", Array.from(SIDES).every(id => /each side/.test(byId(id).name)));
+  const firstBad = keys(FIRST).filter(id => !byId(id) || byId(id).timed !== true || !Number.isInteger(FIRST[id]) || FIRST[id] < byId(id).lo || FIRST[id] > byId(id).hi);
+  check("first-time seconds: timed catalogue exercises, whole seconds inside the range", !firstBad.length, firstBad.join(", "));
+  eq("the abs circuit starts at 40 seconds, 20 a side", Array.from(CIRCUITS[0]).map(id => FIRST[id]), [20, 40, 40, 20, 40, 40]);
+}
+
 h.done(__filename);

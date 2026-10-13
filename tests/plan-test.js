@@ -176,4 +176,91 @@ section("the same log, the same plan");
   check("3,000 entries: the three plans in well under a tenth of a second", Date.now() - t0 < 100, "took " + (Date.now() - t0) + " ms");
 }
 
+/* ---- Circuits: where a hands-free countdown goes after a set ---- */
+
+const SIX = ["star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"];
+const N = (log, exId, now) => T.circuitNext(log, exId, now === undefined ? NOW : now);
+// The six done `rounds` times on a day, a minute apart, in order.
+const circuit = (ts, rounds, secs) => SIX.map((id, i) => G(ts + i * 60000, id, Array(rounds).fill(secs || 40), 0));
+// Today so far: one set of the first `k` of `list`.
+const today = (list, k, sets) => list.slice(0, k).map((id, i) => G(NOW - 3600000 + i * 60000, id, sets || [40], 0));
+
+section("circuits: which exercises go round together");
+{
+  eq("the six abs exercises are one circuit, whichever of them you ask from", SIX.map(id => T.circuitOf(id)), SIX.map(() => SIX));
+  eq("any other exercise is in none: timed or not, unknown, or not an id", ["plank", "hold_failure", "bench_db", "nope", "__proto__", "", null, undefined, 7, {}].map(id => T.circuitOf(id)),
+    [null, null, null, null, null, null, null, null, null, null]);
+  eq("each side: the two that say so, and nothing else", SIX.concat(["plank", "knee_raise_side", "nope", null]).map(id => T.eachSide(id)),
+    [true, false, false, true, false, false, false, false, false, false]);
+}
+
+section("circuits: the next set, round after round");
+{
+  eq("after the first set of the first one: the second, set 1 of 3", N(today(SIX, 1), "star_crunch"), { exId: "leg_flutter", set: 1, sets: 3, circuit: true });
+  eq("in order, one set of each", [1, 2, 3, 4, 5].map(k => N(today(SIX, k), SIX[k - 1]).exId), SIX.slice(1));
+  eq("after the last one, round again from the top: set 2", N(today(SIX, 6), "seated_in_out"), { exId: "star_crunch", set: 2, sets: 3, circuit: true });
+  // A full run from nothing: ask, log the set, ask again.
+  const run = (start, log, cap) => {
+    const order = []; let at = start, lg = log.slice(), guard = 0;
+    const add = id => { const e = lg.find(x => x.exId === id && M.dateStr(x.ts) === M.dateStr(NOW)); if (e) { e.sets.push(40); e.kg.push(0); } else lg.push(G(NOW - 3600000 + lg.length * 1000, id, [40], 0)); };
+    add(at); order.push(at);
+    for (let nx = N(lg, at); nx && guard++ < (cap || 100); nx = N(lg, at)) { at = nx.exId; add(at); order.push(at); }
+    return order;
+  };
+  eq("three rounds of the six, then nothing more", run("star_crunch", []), SIX.concat(SIX, SIX));
+  const fromThird = run("bicycle", []);
+  eq("started in the middle: still one set of each per round, 18 in all", [fromThird.length, fromThird.slice(0, 6), SIX.map(id => fromThird.filter(x => x === id).length)],
+    [18, ["bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out", "star_crunch", "leg_flutter"], [3, 3, 3, 3, 3, 3]]);
+  eq("when the last set is in: nothing", N(circuit(NOW - 7200000, 3), "seated_in_out"), null);
+  eq("as many rounds as last time: two, if that is what the last session had", run("star_crunch", circuit(O(5), 2)).length, 12);
+  eq("…the most any of them had, when last time was cut short", run("star_crunch", circuit(O(5), 2).concat([G(O(5, 13), "star_crunch", [40], 0), G(O(5, 13, 1), "leg_flutter", [40], 0)])).length, 18);
+  eq("never more than ten rounds", N(circuit(O(5), 30), "star_crunch").sets, 10);
+  eq("warm-up sets aren't counted: one counted set today is set 1 done", N([G(NOW - 60000, "star_crunch", [10, 20], 0, { warm: [1, 0] })], "star_crunch"), { exId: "leg_flutter", set: 1, sets: 3, circuit: true });
+  eq("one that was skipped is caught up at the end", (() => {
+    const lg = SIX.filter(id => id !== "boat_hold").map((id, i) => G(NOW - 3600000 + i * 1000, id, [40, 40, 40], 0));
+    return [N(lg, "seated_in_out"), N(lg.concat([G(NOW - 1000, "boat_hold", [40, 40], 0)]), "boat_hold"), N(lg.concat([G(NOW - 1000, "boat_hold", [40, 40, 40], 0)]), "boat_hold")];
+  })(), [{ exId: "boat_hold", set: 1, sets: 3, circuit: true }, { exId: "boat_hold", set: 3, sets: 3, circuit: true }, null]);
+  eq("yesterday's sets are not today's", N(circuit(O(11), 3), "star_crunch"), { exId: "leg_flutter", set: 1, sets: 3, circuit: true });
+  eq("a set logged for tomorrow doesn't count either", N([G(O(13), "leg_flutter", [40, 40, 40], 0)].concat(today(SIX, 1)), "star_crunch").exId, "leg_flutter");
+}
+
+section("circuits: an exercise in none does its own sets");
+{
+  eq("the plank, first time: set 2 of 3 after the first", N([G(NOW - 60000, "plank", [60], 0)], "plank"), { exId: "plank", set: 2, sets: 3, circuit: false });
+  eq("…and nothing after the third", N([G(NOW - 60000, "plank", [60, 60, 60], 0)], "plank"), null);
+  eq("as many sets as last time", [N([G(O(5), "plank", [40, 40], 0), G(NOW - 60000, "plank", [45], 0)], "plank"), N([G(O(5), "plank", [40, 40], 0), G(NOW - 60000, "plank", [45, 45], 0)], "plank")],
+    [{ exId: "plank", set: 2, sets: 2, circuit: false }, null]);
+  eq("nothing logged today yet: its first set", N([], "plank"), { exId: "plank", set: 1, sets: 3, circuit: false });
+  eq("the plank never joins the abs circuit, and the circuit never goes to the plank", [N(today(SIX, 6).concat([G(NOW - 500, "plank", [60], 0)]), "plank").exId, run6()], ["plank", true]);
+  function run6() { const lg = circuit(NOW - 7200000, 3).concat([G(NOW - 500, "plank", [60], 0)]); return SIX.every(id => N(lg, id) === null); }
+}
+
+section("circuits: retired or removed exercises, your own, any order, junk");
+{
+  T.useExercises([{ id: "x_hollow", name: "Hollow hold", p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true, mts: 5 }]);
+  eq("one of your own does its own sets", [T.circuitOf("x_hollow"), N([G(NOW - 60000, "x_hollow", [30], 0)], "x_hollow")], [null, { exId: "x_hollow", set: 2, sets: 3, circuit: false }]);
+  T.useExercises([]);
+  const lg = circuit(O(5), 3).concat(today(SIX, 4)), a = J(N(lg, "plank_knee_elbow"));
+  check("the same from the same log in any order, with or without the index", J(N(shuffled(lg), "plank_knee_elbow")) === a && J(N(lg.slice().reverse(), "plank_knee_elbow")) === a && J(T.circuitNext(T.gymIndex(lg), "plank_knee_elbow", NOW)) === a);
+  eq("(the fifth, set 1 of 3)", JSON.parse(a), { exId: "boat_hold", set: 1, sets: 3, circuit: true });
+  const junk = [null, 7, "x", {}, { kind: "gym" }, { kind: "gym", ts: NOW, exId: "star_crunch", sets: "8" }, { kind: "gym", ts: 1e300, exId: "star_crunch", sets: [8], kg: [0] }, { kind: "gym", ts: NOW, exId: "__proto__", sets: [8], kg: [0] }];
+  const threw = [];
+  [[], null, undefined, "log", junk, lg.concat(junk)].forEach((l, i) => ["star_crunch", "plank", "bench_db", "nope", "__proto__", "", null, 3, {}].forEach(id =>
+    [NOW, O(25, 2, 30), NaN, null, "soon", 1e300].forEach(t => { try { T.circuitNext(l, id, t); T.circuitOf(id); T.eachSide(id); } catch (e) { threw.push(i + " " + String(id) + " " + String(t) + ": " + e.message); } })));
+  check("nothing throws, for odd logs, exercises and times", !threw.length, threw.slice(0, 3).join("\n       "));
+  eq("no next set for an exercise nobody knows or a time that isn't one", [N(lg, "nope"), N(lg, null), N(lg, "star_crunch", NaN), N(lg, "star_crunch", null)], [null, null, null, null]);
+  eq("junk alone: as if nothing was logged", N(junk, "star_crunch"), { exId: "leg_flutter", set: 1, sets: 3, circuit: true });
+}
+
+section("the first time: the abs circuit starts at 40 seconds, 20 a side");
+{
+  const first = id => { const sg = T.suggest(id, [], NOW); return [sg.kind, sg.sets, sg.targets]; };
+  eq("each of the six", SIX.map(first), [["first", 3, [20, 20, 20]], ["first", 3, [40, 40, 40]], ["first", 3, [40, 40, 40]], ["first", 3, [20, 20, 20]], ["first", 3, [40, 40, 40]], ["first", 3, [40, 40, 40]]]);
+  eq("the plank still starts at the top of its range", first("plank"), ["first", 3, [60, 60, 60]]);
+  eq("after a session at 40: five seconds more", T.suggest("leg_flutter", [G(O(5), "leg_flutter", [40, 40, 40], 0)], NOW).targets, [45, 45, 45]);
+  T.useExercises([{ id: "leg_flutter", lo: 45, hi: 50, mts: 5 }, { id: "star_crunch", lo: 5, hi: 15, mts: 5 }]);
+  eq("a range of your own keeps the first time inside it", [first("leg_flutter")[2], first("star_crunch")[2]], [[45, 45, 45], [15, 15, 15]]);
+  T.useExercises([]);
+}
+
 h.done(__filename);

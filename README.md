@@ -132,6 +132,20 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   another app is in front — so with the option on Milo keeps the screen on
   during the rest.
   Each skill step also shows a top-set sparkline over time.
+- **A countdown for timed sets.** A gym exercise logged in seconds has a **▶**
+  on each set of today's sheet: 5 seconds to get ready, then the seconds in
+  the box count down on a big clock (once for each side, with 3 seconds to
+  switch, for the two "each side" exercises). At zero the set is ticked and
+  saved and the rest starts. **Stop** puts the seconds you got to in the box
+  without logging them; **Pause** holds the clock. With **Hands-free** ticked
+  (it is, until you untick it in the sheet) Milo counts the rest too and
+  carries on by itself: round the six-exercise abs circuit, one set of each
+  and then round again until each has as many sets as last time (3 the first
+  time), or the next set of any other timed exercise. Every step beeps and,
+  with the rest notification on, sends the banner that makes an iPhone buzz.
+  It runs only while Milo is on screen, so the screen is kept on; if the app
+  goes to the background the clock pauses and waits for Resume. A reload ends
+  it (the sets it ticked are already saved).
 - **It tells you what to do.** Every movement comes with a prescription — the
   exercise, the sets and reps, and which standard you're chasing — worked out
   from where you are right now. Move up a step and the next screen already asks

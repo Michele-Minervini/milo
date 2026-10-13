@@ -8,7 +8,7 @@
    ============================================================ */
 
 /* Build stamp: app.js refuses to run on files from two different releases. */
-const DATA_BUILD = "milo-v27";
+const DATA_BUILD = "milo-v28";
 
 const AREAS = [
   {
@@ -1406,6 +1406,24 @@ const GROUP_DEFAULTS = {
    from Settings when that is longer: the abs circuit moves on after 20. */
 const GYM_REST = {
   star_crunch: 20, leg_flutter: 20, bicycle: 20, plank_knee_elbow: 20, boat_hold: 20, seated_in_out: 20
+};
+
+/* Exercises done as a circuit: one set of each, in this order, then round
+   again until each has its sets. A hands-free countdown goes round it
+   (training.js, circuitNext; app.js, the work clock). Every id is a timed
+   GYM_EXERCISES id, in one circuit at most (tests/data-test.js). */
+const GYM_CIRCUITS = [
+  ["star_crunch", "leg_flutter", "bicycle", "plank_knee_elbow", "boat_hold", "seated_in_out"]
+];
+
+/* Timed exercises whose set is one side, then the other: the seconds are
+   per side, so a countdown runs twice, with a moment to switch between. */
+const GYM_SIDES = ["star_crunch", "plank_knee_elbow"];
+
+/* The seconds a timed exercise aims for the first time, where that isn't
+   the top of its range: the abs circuit starts at 40 seconds, 20 a side. */
+const GYM_FIRST = {
+  star_crunch: 20, leg_flutter: 40, bicycle: 40, plank_knee_elbow: 20, boat_hold: 40, seated_in_out: 40
 };
 
 /* ---------- Weekly splits: the plan (P6) ----------

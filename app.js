@@ -24,7 +24,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v27";
+  var BUILD = "milo-v28";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -663,18 +663,19 @@
       if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
     } catch (e) { /* no audio available */ }
   }
-  function beep() {
+  // freq (Hz) and len (seconds): the rest's own beep when left out.
+  function beep(freq, len) {
     try {
       if (!audioCtx) return;
       if (audioCtx.state === "suspended" || audioCtx.state === "interrupted") audioCtx.resume();
-      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.type = "sine"; o.frequency.value = 880;
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain(), dur = len || 0.5;
+      o.type = "sine"; o.frequency.value = freq || 880;
       o.connect(g); g.connect(audioCtx.destination);
       var t = audioCtx.currentTime;
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-      o.start(t); o.stop(t + 0.5);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.start(t); o.stop(t + dur);
     } catch (e) { /* ignore */ }
   }
   function vibrate(pat) { try { if (navigator.vibrate) navigator.vibrate(pat); } catch (e) { /* ignore */ } }
@@ -686,6 +687,8 @@
      locks or another app is in front. Kept per device, like the permission. */
   var REST_NOTIFY_KEY = "milo.restNotify";
   var REST_NOTE_TITLE = "Rest over";
+  // Every title Milo sends: the rest's, and the countdown's steps.
+  var NOTE_TITLES = [REST_NOTE_TITLE, "Go", "Switch sides", "Set done"];
   function canNotify() {
     return typeof Notification !== "undefined" && typeof Notification.requestPermission === "function" && !!navigator.serviceWorker;
   }
@@ -699,7 +702,7 @@
   function clearRestNotifications(reg) {
     if (!reg || !reg.getNotifications) return;
     reg.getNotifications().then(function (list) {
-      list.forEach(function (n) { if (n.title === REST_NOTE_TITLE) n.close(); });
+      list.forEach(function (n) { if (NOTE_TITLES.indexOf(n.title) !== -1) n.close(); });
     }).catch(function () { /* nothing to clear */ });
   }
   // Also after the option was switched off: what it left behind still goes.
@@ -707,12 +710,13 @@
     if (!canNotify() || notifyState() !== "granted") return;
     navigator.serviceWorker.ready.then(clearRestNotifications).catch(function () { /* nothing to clear */ });
   }
-  function showRestNotification(body) {
+  // title: one of NOTE_TITLES (the rest's when left out).
+  function showRestNotification(body, title) {
     if (!canNotify() || notifyState() !== "granted") return;
     navigator.serviceWorker.ready.then(function (reg) {
       if (!reg.showNotification) return;
       // Never `silent`: the sound and the buzz are the whole point.
-      return reg.showNotification(REST_NOTE_TITLE, { body: body, icon: "icons/icon-192.png", tag: "milo-rest", renotify: true })
+      return reg.showNotification(title || REST_NOTE_TITLE, { body: body, icon: "icons/icon-192.png", tag: "milo-rest", renotify: true })
         .then(function () {
           clearTimeout(restNoteTimer);
           restNoteTimer = setTimeout(function () { clearRestNotifications(reg); }, 10000);
@@ -821,8 +825,9 @@
   }
 
   /* Keep the screen on (Settings): while a gym exercise is open or a rest
-     timer runs. The browser drops the lock whenever the app is hidden, so
-     it is asked for again on coming back. */
+     timer runs. And always while a set's countdown runs: it stops with the
+     screen. The browser drops the lock whenever the app is hidden, so it is
+     asked for again on coming back. */
   var wakeLock = null, wakeAsking = false;
   function updateWakeLock() {
     if (!navigator.wakeLock) return;
@@ -830,7 +835,8 @@
     // With the rest notification on, the screen also stays on for the rest
     // itself: once the phone locks, nothing runs and nothing could be sent.
     var resting = !!restInterval;
-    var want = !document.hidden && ((!!state.settings.keepAwake && (resting || (!!top && top.t === "gym"))) || (resting && restNotifyOn()));
+    var timing = !!workClock && workClock.paused === null;
+    var want = !document.hidden && ((!!state.settings.keepAwake && (resting || (!!top && top.t === "gym"))) || (resting && restNotifyOn()) || timing);
     if (want && !wakeLock && !wakeAsking) {
       wakeAsking = true;
       navigator.wakeLock.request("screen").then(function (lock) {
@@ -1235,7 +1241,7 @@
                       once. A device with nothing on it at its first launch
                       is given NEWS straight away and never sees it.
        milo.come      "done" once "Coming from another device?" is answered. */
-  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v27";
+  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v28";
   // Dismissed in this page view: holds even where the flag can't be stored.
   var newsSeen = false;
   function flag(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
@@ -1444,7 +1450,7 @@
   function whatsNewLineHTML() {
     return '<div class="today-card wnline">' +
       '<button class="wn-open" id="whatsNewBtn" type="button">' + ico("&#10024;") +
-      '<span class="wn-text"><b>A weekly plan for the gym.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<span class="wn-text"><b>A countdown for timed sets.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
       '<button class="nc-x" id="whatsNewX" type="button" aria-label="Hide what&#8217;s new">&#10005;</button></div>';
   }
 
@@ -2969,6 +2975,10 @@
   function whatsNewPaneHTML() {
     return sheetHead({ title: ico("&#10024;") + "What&#8217;s new in Milo", sub: "Once, after this update" }) +
       '<div class="sheet-body volinfo whatsnew">' +
+      "<h4>A countdown for timed sets</h4><p>An exercise logged in seconds now has a <b>&#9654;</b> on each set: 5 seconds to get ready, then the countdown, once for each side where that applies. " +
+      "At zero the set is ticked and the rest starts. With <b>Hands-free</b> on (it is, until you untick it in the exercise) Milo carries on by itself after each rest: " +
+      "round the six abs exercises as a circuit, or the next set of any other timed exercise. <b>Pause</b> and <b>Stop</b> are always there. " +
+      "It runs only while Milo is on screen, so Milo keeps the screen on.</p>" +
       "<h4>A weekly plan for the gym</h4><p>In <b>Settings &#8594; Weekly plan</b>, pick your split: 5 days, 6 days (back and shoulders apart) or Push / Pull / Legs. " +
       "Today then shows the day you are on and its exercises, each with its sets and the weight to use. Milo works the day out from what you log, so skipping a day or training out of order is fine; " +
       "<b>Different day</b> picks another one for today. <b>Save &#8594;</b> in a gym exercise now goes to the plan&#8217;s next exercise, round after round if you do one set of each.</p>" +
@@ -3063,7 +3073,8 @@
         : "iPhones give web apps no vibration, and the beep is muted on silent. A notification is the only thing that can buzz, " +
           "and whether it does is up to the phone&#8217;s own settings, so send a test. " +
           "It only works while Milo is open on screen: not once the phone locks or another app is in front" +
-          (navigator.wakeLock ? ", so Milo keeps the screen on during the rest." : ".")) + "</p>" +
+          (navigator.wakeLock ? ", so Milo keeps the screen on during the rest." : ".") +
+          " The countdown for a timed set uses it too: go, switch sides, set done.") + "</p>" +
       (on ? '<div class="btnrow"><button class="btn" id="restNotifyTest" type="button">Send a test now</button></div>' +
         '<p class="hint">' + (iphone
           ? "No banner or buzz? In the iPhone&#8217;s Settings &#8594; Notifications &#8594; Milo, allow banners and sounds; a Focus can also hold it back."
@@ -3535,7 +3546,8 @@
     var text;
     switch (sg.kind) {
       case "first":
-        if (ex.timed) text = "First time: " + (sg.sets || 3) + " sets, each as long as you can with good form, up to " + ex.hi + " seconds.";
+        if (ex.timed && t.length && t[0] < ex.hi) text = "First time: " + (sg.sets || 3) + " sets of " + t[0] + " seconds" + (TRAINING.eachSide(ex.id) ? " a side" : "") + ".";
+        else if (ex.timed) text = "First time: " + (sg.sets || 3) + " sets, each as long as you can with good form, up to " + ex.hi + " seconds.";
         else if (ex.load === "ext") text = "First time: pick a weight you could lift about " + (ex.hi + 2) + " times, and do " + (sg.sets || 3) + " sets of " + ex.hi + ".";
         else if (ex.load === "assist") text = "First time: pick the help that lets you do about " + (ex.hi + 2) + " good reps, and do " + (sg.sets || 3) + " sets of " + ex.hi + ".";
         else text = "First time: " + (sg.sets || 3) + " sets at bodyweight, as many good reps as you can, up to " + ex.hi + ".";
@@ -3562,9 +3574,44 @@
     return text ? '<div class="rx gymrx"><span class="rxlabel">Suggested</span><span class="rxgoal">' + text + "</span></div>" : "";
   }
 
+  // The grey number in each row's empty reps box (what to aim for), or null
+  // where there is none. A sheet opened as a copy of last time carries one
+  // per row (r.hint). Otherwise the suggested reps go to the counted sets:
+  // the k-th row that isn't a warm-up gets the k-th target; a warm-up row
+  // gets none. A suggestion is for today's workout; on a past day's entry it
+  // would be about the wrong day.
+  function gymTargets(d) {
+    var sg = d.date === quickDays().today ? gymSuggestion(d.exId, d.entryId) : null;
+    var targets = sg && sg.targets ? sg.targets : [];
+    var copied = d.rows.some(function (r) { return r.hint != null; });
+    var counted = 0;
+    return {
+      sg: sg, copied: copied, any: targets.length > 0,
+      rows: d.rows.map(function (r) {
+        var t = copied ? r.hint : (r.warm ? null : targets[counted++]);
+        return t == null ? null : t;
+      })
+    };
+  }
+
+  // A set can be counted down: a timed exercise, in today's sheet.
+  function canTime(d, ex) { return !!ex && !!ex.timed && !hasKg(ex) && d.date === quickDays().today && !readOnly; }
+
+  // Under a timed exercise's sets: what the play button does, and hands-free.
+  function handsFreeHTML(exId) {
+    var ring = TRAINING.circuitOf(exId);
+    return '<p class="hint gtip"><b>&#9654;</b> counts a set down for you: ' + CLOCK_READY + " seconds to get ready, then the seconds in its box" +
+      (TRAINING.eachSide(exId) ? ", once for each side" : "") + ". At zero the set is ticked and the rest starts.</p>" +
+      '<label class="exchk"><input type="checkbox" id="handsFreeChk"' + (handsFreeOn() ? " checked" : "") + "> Hands-free: carry on by itself after each rest</label>" +
+      '<p class="hint ghf">' + (ring
+        ? "Round the circuit, one set of each, then round again: " + ring.map(function (id) { return esc(exName(id)); }).join(" &#8594; ") + "."
+        : "The next set starts when the rest ends, until today has as many sets as last time (3 the first time).") + "</p>";
+  }
+
   function gymPaneHTML() {
     var d = gymDraft;
     if (!d) return "";
+    if (clockFor(d)) return clockPaneHTML(d);
     var ex = TRAINING.exercise(d.exId), k = quickDays();
     var mode = d.pick ? "pick" : (d.date === k.today ? "today" : (d.date === k.yesterday ? "yesterday" : "pick"));
     d.shown = mode;
@@ -3572,18 +3619,10 @@
       return '<button type="button" class="chip gday' + (mode === m ? " sel" : "") + '" data-day="' + m + '" aria-pressed="' + (mode === m) + '">' + label + "</button>";
     };
     var last = TRAINING.lastSession(state.log, d.exId, { exclude: d.entryId, before: dateFromKey(d.date) });
-    // A suggestion is for today's workout; on a past day's entry it would be about the wrong day.
-    var sg = d.date === k.today ? gymSuggestion(d.exId, d.entryId) : null;
-    var targets = sg && sg.targets ? sg.targets : [];
-    // The grey number in an empty reps box. A sheet opened as a copy of last
-    // time carries one per row (r.hint). Otherwise the suggested reps go to
-    // the counted sets: the k-th row that isn't a warm-up gets the k-th
-    // target; a warm-up row gets none.
-    var copied = d.rows.some(function (r) { return r.hint != null; });
-    var counted = 0;
+    var tg = gymTargets(d), sg = tg.sg, copied = tg.copied, play = canTime(d, ex);
     var rows = d.rows.map(function (r, i) {
       var warm = !!r.warm;
-      var target = copied ? (r.hint != null ? r.hint : null) : (warm ? null : targets[counted++]);
+      var target = tg.rows[i];
       return '<li class="gset' + (r.done ? " done" : "") + (warm ? " warm" : "") + '" data-i="' + i + '">' +
         '<button type="button" class="gnum" aria-pressed="' + warm + '" aria-label="Set ' + (i + 1) + ': warm-up, not counted"><span class="gchip">' + (warm ? "W" : i + 1) + "</span></button>" +
         (hasKg(ex)
@@ -3593,21 +3632,24 @@
           : "") +
         '<input class="stepval repval" type="number" inputmode="numeric" min="1" max="3600" value="' + esc(r.reps) + '" placeholder="' + (target != null ? target : "") + '" aria-label="' + (ex && ex.timed ? "Seconds" : "Reps") + ", set " + (i + 1) + '">' +
         '<span class="gunit" aria-hidden="true">' + repUnit(ex) + "</span>" +
+        (play ? (r.done ? '<span class="gplay none" aria-hidden="true"></span>'
+          : '<button type="button" class="gplay" aria-label="Start the countdown for set ' + (i + 1) + '">&#9654;</button>') : "") +
         '<button type="button" class="gtick" aria-pressed="' + r.done + '" aria-label="Set ' + (i + 1) + ' done">&#10003;</button></li>';
     }).join("");
     return sheetHead({
       title: '<span class="swatch" style="--area:' + exColor(ex) + '"></span>' + esc(exName(d.exId)),
       sub: exSubline(ex) + (ex ? ' <button class="infobtn exinfo" id="exInfoBtn" type="button" aria-label="About this exercise">&#9432;</button>' : "")
     }) +
-      '<div class="sheet-body quickpane gympane' + (hasKg(ex) ? "" : " gpane-bw") + '" style="--area:' + exColor(ex) + '">' +
+      '<div class="sheet-body quickpane gympane' + (hasKg(ex) ? "" : " gpane-bw") + (play ? " gpane-play" : "") + '" style="--area:' + exColor(ex) + '">' +
       '<div class="chips" role="group" aria-label="Day">' + chip("today", "Today") + chip("yesterday", "Yesterday") + chip("pick", "Pick a day") + "</div>" +
       (mode === "pick" ? '<label class="visually-hidden" for="gymDate">Day you trained</label><input type="date" id="gymDate" class="qdate" value="' + esc(d.date) + '" min="2000-01-01" max="' + k.today + '">' : "") +
       (last ? '<p class="glast"><b>Last time</b> &middot; ' + esc(dayLabel(last.ts)) + ": " + esc(lastSetsText(ex, last)) + "</p>" : "") +
       '<div id="gymRec">' + gymRecHTML(d, ex) + "</div>" +
       suggestionHTML(ex, sg) +
       '<ol class="gsets" aria-label="Sets">' + rows + "</ol>" +
+      (play ? handsFreeHTML(d.exId) : "") +
       '<p class="hint gtip">Tick &#10003; each set as you finish it: it&#8217;s saved straight away' +
-      (targets.length || copied ? ", and an empty " + repUnit(ex) + " box takes the grey number in it" : "") + ". " +
+      (tg.any || copied ? ", and an empty " + repUnit(ex) + " box takes the grey number in it" : "") + ". " +
       (copied ? "The rows are last time&#8217;s sets, with their weights and warm-ups. " : "") +
       "Tap a set&#8217;s number to make it <b>W</b>, a warm-up: it stays in the log but isn&#8217;t counted.</p>" +
       '<div class="btnrow"><button class="btn" id="gymAddSet" type="button">&#65291; Add set</button>' +
@@ -3746,9 +3788,25 @@
     return ok;
   }
 
+  // Ticks a row and saves it, for the tick button and for a countdown that
+  // ran out. A record: only for a set ticked in today's sheet, only once it
+  // is really saved, and only when the day's record is new or better than it
+  // was a moment ago (a second equal set says nothing).
+  //   { ok, rec: the record's toast, or "" }
+  function tickSave(d, ex, r) {
+    var live = d.date === quickDays().today, was = live ? dayRecord(d.exId, d.date) : null;
+    r.done = true;
+    d.dirty = true;
+    var ok = commitGym();
+    var now = ok && live && storageOk && !readOnly ? dayRecord(d.exId, d.date) : null;
+    var rec = !!now && (!was || now.kg !== was.kg || now.reps !== was.reps || now.by !== was.by);
+    return { ok: ok, rec: rec ? "\ud83c\udfc6 New record: " + oneSet(ex, now.kg, now.reps) : "" };
+  }
+
   function wireGym(sheet) {
     var d = gymDraft;
     if (!d) return;
+    if (clockFor(d)) { wireClock(sheet); return; }
     var ex = TRAINING.exercise(d.exId);
     var inc = ex && ex.inc ? ex.inc : 2.5;
     // A ticked set corrected in its box: the "To beat" / "New record" line
@@ -3824,6 +3882,8 @@
         renderSheet();
         focusIn($("#sheet"), '.gset[data-i="' + i + '"] .gnum');
       });
+      var playBtn = $("button.gplay", li);
+      if (playBtn) playBtn.addEventListener("click", function () { readGymInputs(sheet); startClock(i); });
       tick.addEventListener("click", function () {
         readGymInputs(sheet);
         var recToast = "";
@@ -3833,18 +3893,9 @@
           if (r.reps === "" || !isFinite(reps) || reps < 1) { toast("Enter the " + repUnit(ex) + " first"); if (repIn) repIn.focus(); return; }
           if (kgTypedBad(r.kg)) { toast("That weight isn't a number"); if (kgIn) kgIn.focus(); return; }
           if (hasKg(ex) && r.kg === "" && ex && ex.load === "ext") { toast("Enter the weight first"); if (kgIn) kgIn.focus(); return; }
-          // A record: only for a set ticked in today's sheet, only once it is
-          // really saved, and only when the day's record is new or better
-          // than it was a moment ago (a second equal set says nothing).
-          var live = d.date === quickDays().today, was = live ? dayRecord(d.exId, d.date) : null;
-          r.done = true;
-          d.dirty = true;
-          var ok = commitGym();
-          if (ok && state.settings.autoRest && !readOnly) startRest(restFor(ex), { gym: true });
-          var now = ok && live && storageOk && !readOnly ? dayRecord(d.exId, d.date) : null;
-          if (now && (!was || now.kg !== was.kg || now.reps !== was.reps || now.by !== was.by)) {
-            recToast = "\ud83c\udfc6 New record: " + oneSet(ex, now.kg, now.reps);
-          }
+          var res = tickSave(d, ex, r);
+          if (res.ok && state.settings.autoRest && !readOnly) startRest(restFor(ex), { gym: true });
+          recToast = res.rec;
         } else {
           r.done = false;
           d.dirty = true;
@@ -3857,6 +3908,8 @@
       });
     });
 
+    var hf = $("#handsFreeChk", sheet);
+    if (hf) hf.addEventListener("change", function () { setFlag(HANDS_FREE_KEY, hf.checked ? "on" : "off"); });
     var add = $("#gymAddSet", sheet);
     if (add) add.addEventListener("click", function () {
       readGymInputs(sheet);
@@ -3934,6 +3987,326 @@
     if (next && nx) { openGym(nx, null); return; }
     if (next && nx !== "") uiStack.push({ t: "gympick" });
     renderSheet();
+  }
+
+  /* ---- The work clock: a countdown for a timed set ----
+
+     A tap on a set's play button counts it down in the exercise's own sheet:
+     a few seconds to get ready, then the seconds of the set — once for each
+     side where the exercise is done a side at a time, with a moment to
+     switch — and at zero the set is ticked and saved, as a tap on its tick
+     would. Hands-free (milo.handsFree, per device, on unless switched off):
+     the clock then counts the rest too and starts what comes next by itself,
+     the circuit's next exercise or the same exercise's next set
+     (TRAINING.circuitNext), until nothing is left.
+
+     Every step has its signal: a beep and, with the rest notification on,
+     the banner that makes an iPhone buzz. Eyes are not on the phone.
+
+     Like the rest timer it runs only while Milo is on screen, so the screen
+     is kept on. Time that goes by while Milo is hidden doesn't count: the
+     clock pauses, and waits for Resume. Nothing of it is stored: a reload
+     ends it (the sets it ticked are in the log already). */
+
+  var HANDS_FREE_KEY = "milo.handsFree";
+  var CLOCK_READY = 5;      // seconds to get into position before a set
+  var CLOCK_SWITCH = 3;     // seconds to change sides
+  var CLOCK_TICK = 200;     // ms between two looks at the time
+  var CLOCK_GAP = 1500;     // ms without a look: nothing was running meanwhile
+  // { d: the gym draft it runs in, row, secs, chain: hands-free,
+  //   phases: [{ k: "ready" | "work" | "switch" | "rest", s: seconds, side: 0 | 1 | 2 }], at,
+  //   end: when the phase ends (ms), last: the last look, paused: null or the ms left,
+  //   beeped: the last second counted in, next: what follows the rest,
+  //   sets: how many the exercise is to get today when the clock knows (0: as many as the sheet has rows), timer }
+  var workClock = null;
+
+  function handsFreeOn() { return flag(HANDS_FREE_KEY) !== "off"; }
+  function clockFor(d) { return workClock && workClock.d === d ? workClock : null; }
+
+  function workPhases(exId, secs) {
+    return TRAINING.eachSide(exId)
+      ? [{ k: "work", s: secs, side: 1 }, { k: "switch", s: CLOCK_SWITCH, side: 0 }, { k: "work", s: secs, side: 2 }]
+      : [{ k: "work", s: secs, side: 0 }];
+  }
+
+  // The seconds a row's countdown runs: what is typed in its box, else the
+  // grey number in it. 0 when there is neither, or what is typed is no time.
+  function rowSecs(d, i) {
+    var r = d.rows[i], typed = Math.round(Number(r.reps));
+    if (r.reps !== "") return isFinite(typed) && typed >= 1 ? Math.min(3600, typed) : 0;
+    var t = gymTargets(d).rows[i];
+    return t != null && t >= 1 ? Math.min(3600, Math.round(t)) : 0;
+  }
+  // The first set still to do (warm-ups aside); a new row when there is none.
+  function openRow(d) {
+    for (var i = 0; i < d.rows.length; i++) if (!d.rows[i].done && !d.rows[i].warm) return i;
+    d.rows.push({ kg: "", reps: "", done: false, warm: false });
+    return d.rows.length - 1;
+  }
+  // The seconds of the last set ticked in a sheet, or 0.
+  function lastSecs(d) {
+    for (var i = d.rows.length - 1; i >= 0; i--) {
+      var n = Math.round(Number(d.rows[i].reps));
+      if (d.rows[i].done && n >= 1) return n;
+    }
+    return 0;
+  }
+
+  // Where the next phase starts: where the last one ended, so the look that
+  // noticed it (up to CLOCK_TICK late) costs nothing; from now when that
+  // was skipped or long ago.
+  function phaseStart(c, now) {
+    var late = now - c.end;
+    return late >= 0 && late < 1000 ? c.end : now;
+  }
+
+  function clockSay(title, body) {
+    var sr = $("#sr-live");
+    if (sr) sr.textContent = title + (body ? ". " + body : "");
+    if (restNotifyOn()) showRestNotification(body, title);
+  }
+  function nextText(c) {
+    var nx = c.next;
+    return (nx.exId === c.d.exId ? "set " + nx.set : exName(nx.exId) + " · set " + nx.set) + " of " + nx.sets;
+  }
+
+  // Starts the phase the clock is on, from `from` (ms), with its signal.
+  function enterPhase(from) {
+    var c = workClock, p = c.phases[c.at];
+    c.end = from + p.s * 1000;
+    c.beeped = 0;
+    if (p.k === "work") {
+      beep(1175, 0.7); vibrate([200]);
+      clockSay("Go", p.side === 2 ? "The other side, " + p.s + " seconds." : exName(c.d.exId) + ", " + p.s + " seconds" + (p.side ? " a side." : "."));
+    } else if (p.k === "switch") {
+      beep(); vibrate([120, 60, 120]);
+      clockSay("Switch sides", p.s + " seconds, then the other side.");
+    }
+  }
+
+  // The play button of row i.
+  function startClock(i) {
+    var d = gymDraft, secs = rowSecs(d, i);
+    if (!secs) { toast("Enter the seconds first"); focusIn($("#sheet"), '.gset[data-i="' + i + '"] .repval'); return; }
+    endClock();
+    cancelRest();            // the set starts: a rest still running is over
+    ensureAudio();
+    // How many sets the exercise is to get today, for "Set 2 of 3".
+    var plan = TRAINING.circuitNext(gym(), d.exId, nowMs());
+    workClock = {
+      d: d, row: i, secs: secs, chain: handsFreeOn(),
+      phases: [{ k: "ready", s: CLOCK_READY, side: 0 }].concat(workPhases(d.exId, secs)), at: 0,
+      end: 0, last: nowMs(), paused: null, beeped: 0, next: null, sets: plan ? plan.sets : 0, timer: null
+    };
+    enterPhase(nowMs());
+    workClock.timer = setInterval(clockTick, CLOCK_TICK);
+    renderSheet();
+    focusIn($("#sheet"), "#wcPause");
+    updateWakeLock();
+  }
+
+  function clockTick() {
+    var c = workClock, now = nowMs();
+    if (!c) return;
+    if (c.paused !== null) { c.last = now; return; }
+    // Nothing ran for a while (the phone locked, the app was frozen in the
+    // background): that time didn't count, the clock picks up where it was.
+    if (now - c.last > CLOCK_GAP) c.end += now - c.last;
+    c.last = now;
+    var p = c.phases[c.at], left = c.end - now;
+    if (left <= 0) { phaseDone(now); return; }
+    // The last three seconds before work are counted in.
+    var whole = Math.ceil(left / 1000);
+    if (p.k !== "work" && whole <= 3 && whole < p.s && whole !== c.beeped) { c.beeped = whole; beep(660, 0.15); }
+    paintClock();
+  }
+
+  function phaseDone(now) {
+    var c = workClock;
+    if (c.phases[c.at].k === "rest") { clockNext(now); return; }
+    if (c.at + 1 < c.phases.length) {
+      var from = phaseStart(c, now);
+      c.at++;
+      enterPhase(from);
+      paintClock();
+      return;
+    }
+    setDone(now);
+  }
+
+  // The countdown ran out: the set is ticked and saved with its seconds.
+  // Then the rest. Hands-free with something left to do: the clock's own,
+  // and what follows it. Else the usual rest pill, and the sheet again.
+  function setDone(now) {
+    var c = workClock, d = c.d, ex = TRAINING.exercise(d.exId), r = d.rows[c.row];
+    if (gymDraft !== d || !r || r.done) { endClock(); renderSheet(); return; }
+    var from = phaseStart(c, now), rest = restFor(ex);
+    r.reps = String(c.secs);
+    var res = tickSave(d, ex, r);
+    var next = res.ok && c.chain ? TRAINING.circuitNext(gym(), d.exId, nowMs()) : null;
+    beep(); vibrate([120, 60, 120]);
+    if (next) {
+      c.next = next;
+      c.phases = [{ k: "rest", s: rest, side: 0 }];
+      c.at = 0;
+      c.end = from + rest * 1000;
+      c.beeped = 0;
+      clockSay("Set done", "Rest " + rest + " seconds. Next: " + nextText(c) + ".");
+      paintClock();
+    } else {
+      endClock();
+      clockSay("Set done", res.ok && c.chain ? "That was the last one." : "");
+      if (res.ok && state.settings.autoRest && !readOnly) startRest(rest, { gym: true });
+      renderSheet();
+      focusIn($("#sheet"), '.gset[data-i="' + c.row + '"] .gtick');
+      if (res.ok && c.chain && !res.rec) toast(TRAINING.circuitOf(d.exId) ? "Circuit done ✓" : "All sets done ✓");
+    }
+    // After the focus move, or a screen reader would cut it off.
+    if (res.rec) { toast(res.rec, 4000); recToastUntil = nowMs() + 4000; }
+  }
+
+  // The rest is over: the next set starts — in this sheet, or for a
+  // circuit's next exercise in its own, opened as "Save → next" opens it.
+  function clockNext(now) {
+    var c = workClock, nx = c.next, d = c.d, from = phaseStart(c, now), moved = nx.exId !== d.exId;
+    if (moved) {
+      workClock = null;       // between two sheets it is nobody's: renderSheet must not end it
+      saveGymDraft();
+      gymDraft = null;
+      uiStack.pop();
+      while (uiStack.length && /^(logpick|logskill|gympick)$/.test(uiStack[uiStack.length - 1].t)) uiStack.pop();
+      openGym(nx.exId, null);
+      d = gymDraft;
+      var top = uiStack[uiStack.length - 1];
+      if (!d || d.exId !== nx.exId || !top || top.g !== d || !canTime(d, TRAINING.exercise(d.exId))) {
+        clearInterval(c.timer);
+        updateWakeLock();
+        return;
+      }
+      workClock = c;
+      c.d = d;
+    }
+    c.row = openRow(d);
+    c.secs = rowSecs(d, c.row) || lastSecs(d) || c.secs;
+    c.sets = nx.sets;
+    c.next = null;
+    c.phases = workPhases(d.exId, c.secs);
+    c.at = 0;
+    enterPhase(from);
+    if (moved) renderSheet(); else paintClock();
+  }
+
+  function pauseClock() {
+    var c = workClock;
+    if (!c || c.paused !== null) return;
+    c.paused = Math.max(0, c.end - nowMs());
+    paintClock();
+    updateWakeLock();
+  }
+  function resumeClock() {
+    var c = workClock;
+    if (!c || c.paused === null) return;
+    c.end = nowMs() + c.paused;
+    c.last = nowMs();
+    c.paused = null;
+    ensureAudio();
+    paintClock();
+    updateWakeLock();
+  }
+  document.addEventListener("visibilitychange", function () { if (document.hidden) pauseClock(); });
+
+  function endClock() {
+    var c = workClock;
+    if (!c) return;
+    clearInterval(c.timer);
+    workClock = null;
+    updateWakeLock();
+  }
+  // How long the clock's phase still has, in seconds.
+  function clockLeft(c) { return Math.max(0, c.paused !== null ? c.paused : c.end - nowMs()) / 1000; }
+
+  // Stop: back to the sheet. A set under way isn't logged, but the seconds
+  // it got to go into its box, one tick away from the log. A rest goes on
+  // in the usual pill.
+  function stopClock() {
+    var c = workClock;
+    if (!c) return;
+    var d = c.d, p = c.phases[c.at], r = d.rows[c.row], left = clockLeft(c), msg = "";
+    if (p.k === "work" && r && !r.done) {
+      var did = Math.min(p.s, Math.floor(p.s - left));
+      if (did >= 1) { r.reps = String(did); msg = "Stopped at " + did + " sec. Tick ✓ to log it."; }
+    }
+    endClock();
+    if (gymDraft === d) saveGymDraft();
+    if (p.k === "rest" && left > 1) startRest(left, { gym: true });
+    renderSheet();
+    focusIn($("#sheet"), p.k === "rest" ? "#gymNext" : '.gset[data-i="' + c.row + '"] .gtick');
+    if (msg) toast(msg, 3500);
+  }
+  // The sheet under a running countdown went away (✕, back, a swipe): the
+  // countdown ends with it. A rest goes on in the usual pill.
+  function leaveClock() {
+    var c = workClock, p = c.phases[c.at], left = clockLeft(c);
+    endClock();
+    if (p.k === "rest" && left > 1) startRest(left, { gym: true });
+  }
+
+  function clockPaneHTML(d) {
+    var ex = TRAINING.exercise(d.exId);
+    return sheetHead({ title: '<span class="swatch" style="--area:' + exColor(ex) + '"></span>' + esc(exName(d.exId)), sub: exSubline(ex) }) +
+      '<div class="sheet-body quickpane gympane wcpane" style="--area:' + exColor(ex) + '">' +
+      '<div class="wc" id="wc">' +
+      '<p class="wc-phase" id="wcPhase"></p>' +
+      '<p class="wc-time" id="wcTime" role="timer"></p>' +
+      '<div class="wc-bar" aria-hidden="true"><span id="wcBar"></span></div>' +
+      '<p class="wc-set" id="wcSet"></p>' +
+      '<p class="wc-next" id="wcNext"></p>' +
+      '<button type="button" class="btn" id="wcSkip" hidden>Start now</button>' +
+      "</div></div>" +
+      '<div class="sheet-foot gymfoot"><button type="button" class="btn wide" id="wcStop">Stop</button>' +
+      '<button type="button" class="btn primary wide" id="wcPause">Pause</button></div>';
+  }
+
+  // The clock's words and numbers, in place: a redraw would take the focus
+  // off its buttons five times a second.
+  function paintClock() {
+    var c = workClock, box = $("#wc");
+    if (!c || !box) return;
+    var put = function (id, text) { var el = $(id); if (el && el.textContent !== text) el.textContent = text; };
+    var p = c.phases[c.at], d = c.d, left = clockLeft(c), held = c.paused !== null;
+    var label = p.k === "ready" ? "Get ready" : (p.k === "switch" ? "Switch sides" : (p.k === "rest" ? "Rest" : (p.side ? "Side " + p.side + " of 2" : "Go")));
+    if (box.getAttribute("data-k") !== p.k) box.setAttribute("data-k", p.k);
+    box.classList.toggle("paused", held);
+    put("#wcPhase", (held ? "Paused · " : "") + label);
+    var whole = Math.ceil(left);
+    put("#wcTime", whole < 60 ? String(whole) : fmtTime(whole));
+    var bar = $("#wcBar");
+    if (bar) bar.style.width = Math.max(0, Math.min(100, (1 - left / p.s) * 100)).toFixed(1) + "%";
+    // "Set 2 of 3": warm-ups aside, and of as many as the circuit gives it
+    // when a sheet reopened mid-way has fewer rows than that.
+    var counted = function (r) { return !r.warm; };
+    put("#wcSet", "Set " + d.rows.slice(0, c.row + 1).filter(counted).length + " of " + Math.max(d.rows.filter(counted).length, c.sets) +
+      (p.k === "rest" ? " saved ✓" : " · " + c.secs + " sec" + (TRAINING.eachSide(d.exId) ? " each side" : "")));
+    put("#wcNext", p.k === "rest" ? "Next: " + nextText(c) : (c.chain ? "Hands-free: the rest and what comes next start by themselves." : ""));
+    var skip = $("#wcSkip");
+    if (skip) skip.hidden = p.k !== "rest";
+    put("#wcPause", held ? "Resume" : "Pause");
+  }
+
+  function wireClock(sheet) {
+    $("#wcStop", sheet).addEventListener("click", stopClock);
+    $("#wcPause", sheet).addEventListener("click", function () {
+      if (workClock && workClock.paused !== null) resumeClock(); else pauseClock();
+    });
+    $("#wcSkip", sheet).addEventListener("click", function () {
+      var c = workClock;
+      if (!c || c.phases[c.at].k !== "rest") return;
+      resumeClock();
+      c.end = nowMs();
+      phaseDone(nowMs());
+      focusIn($("#sheet"), "#wcPause");
+    });
+    paintClock();
   }
 
   /* ---- One exercise: numbers, its settings, its history ---- */
@@ -4512,6 +4885,11 @@
   function renderSheet() {
     var sheet = $("#sheet");
     var scrim = $("#scrim");
+    // A countdown belongs to the gym sheet it was started in.
+    if (workClock) {
+      var timed = uiStack[uiStack.length - 1];
+      if (!timed || timed.t !== "gym" || timed.g !== workClock.d) leaveClock();
+    }
     if (!uiStack.length) {
       sheet.classList.remove("show");
       scrim.classList.remove("show");
