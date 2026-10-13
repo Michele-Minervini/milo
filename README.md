@@ -146,6 +146,15 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   It runs only while Milo is on screen, so the screen is kept on; if the app
   goes to the background the clock pauses and waits for Resume. A reload ends
   it (the sets it ticked are already saved).
+- **Set times.** A timed exercise whose range is one number is done for
+  exactly that long, and Milo never raises it by itself: the six of the abs
+  circuit come that way (40 seconds, 20 a side). Its sheet has **Seconds per
+  set** with − and + (5 seconds at a time, or type any number from 5 to 600),
+  and **All the circuit's times and its rest** shows the six together with
+  the rest between sets. A time is that exercise's own range, so it is saved
+  and synced like any other change to an exercise; the circuit's rest is kept
+  on the device. Give a timed exercise two different numbers (ⓘ → Fewest and
+  Most) and Milo builds its time up again, 5 seconds a session.
 - **It tells you what to do.** Every movement comes with a prescription — the
   exercise, the sets and reps, and which standard you're chasing — worked out
   from where you are right now. Move up a step and the next screen already asks

@@ -2158,3 +2158,12 @@ p.lc-cap { margin: 6px 2px 0; font-size: 0.8rem; color: var(--muted); line-heigh
 .wc #wcSkip { margin-top: 10px; }
 .wc #wcSkip[hidden] { display: none; }
 .wc.paused .wc-time { opacity: 0.4; }
+
+/* ---------- A set time: seconds per set, and the circuit's times ---------- */
+.gympane .secsrow { margin: 10px 2px 2px; }
+.secsrow .vlab { min-width: 0; }
+.secsrow .stepval { width: 56px; }
+.gympane .circlink { margin: 2px 2px 0; }
+.circuitpane .secsrow { margin-top: 10px; }
+.secsfree { font-size: 0.84rem; color: var(--muted); text-align: right; }
+.circuitpane .hint { margin: 10px 2px 0; }

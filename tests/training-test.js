@@ -1750,16 +1750,18 @@ section("the gym: every catalogue exercise's first sessions, end to end");
       .map(e => M.sanitizeLogEntry(e));
     const sg = T.suggest(c.id, log, L(2026, 9, 22));
     const reps = c.timed || c.load === "bw";
-    const want = reps ? ["harder", 0, 2, [c.hi, c.hi]]
+    // A timed exercise with one number for a range is done for that time, always.
+    const fixed = c.timed && c.lo === c.hi;
+    const want = fixed ? ["fixed", 0, 2, [c.hi, c.hi]] : reps ? ["harder", 0, 2, [c.hi, c.hi]]
       : c.load === "assist" ? ["up", 20 - c.inc, 2, fill2(Math.abs(c.inc) / 20 > 0.1 ? Math.max(1, c.lo - 2) : c.lo)]
         : ["up", 20 + c.inc, 2, fill2(c.load !== "added" && c.inc / 20 > 0.1 ? Math.max(1, c.lo - 2) : c.lo)];
     if (!same([sg.kind, sg.kg, sg.sets, sg.targets], want)) bad.push(c.id + " " + J([sg.kind, sg.kg, sg.sets, sg.targets]) + " ≠ " + J(want));
     const mid = T.suggest(c.id, log, L(2026, 9, 15, 7));
-    const wantMid = [reps ? "reps" : "same", kg, 2, [Math.min(c.hi, c.hi), Math.min(c.hi, c.lo + (c.timed ? 5 : 1))]];
+    const wantMid = fixed ? want : [reps ? "reps" : "same", kg, 2, [Math.min(c.hi, c.hi), Math.min(c.hi, c.lo + (c.timed ? 5 : 1))]];
     if (!same([mid.kind, mid.kg, mid.sets, mid.targets], wantMid)) bad.push(c.id + " mid " + J([mid.kind, mid.kg, mid.sets, mid.targets]) + " ≠ " + J(wantMid));
   });
   function fill2(x) { return [x, x]; }
-  check("all " + CAT.length + ": same/reps while short of hi, then up (or harder) with the right step and floor", !bad.length, bad.slice(0, 4).join("\n       "));
+  check("all " + CAT.length + ": same/reps while short of hi, then up (or harder) with the right step and floor; a set time stays", !bad.length, bad.slice(0, 4).join("\n       "));
 }
 
 section("the gym with a big log stays quick");

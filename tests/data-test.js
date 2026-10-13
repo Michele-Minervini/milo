@@ -206,9 +206,9 @@ GYM.forEach(e => {
     const n = GYM.filter(e => e.p === g && GYM_RETIRED.indexOf(e.id) === -1).length;
     check(g + ": at least 4 exercises to choose from (retired ones not counted)", n >= 4, n);
   });
-  check("the timed exercises: the plank 20–60 s, the hold till failure 20–120 s, and the six of the abs circuit (15–40 s a side, 20–60 s)",
+  check("the timed exercises: the plank 20–60 s, the hold till failure 20–120 s, and the six of the abs circuit at a set time (20 s a side, 40 s)",
     same(GYM.filter(e => e.timed).map(e => [e.id, e.lo, e.hi]), [["plank", 20, 60], ["hold_failure", 20, 120],
-      ["star_crunch", 15, 40], ["leg_flutter", 20, 60], ["bicycle", 20, 60], ["plank_knee_elbow", 15, 40], ["boat_hold", 20, 60], ["seated_in_out", 20, 60]]));
+      ["star_crunch", 20, 20], ["leg_flutter", 40, 40], ["bicycle", 40, 40], ["plank_knee_elbow", 20, 20], ["boat_hold", 40, 40], ["seated_in_out", 40, 40]]));
   check("kg per hand: the dumbbell-in-each-hand and one-arm exercises, not the goblet squat",
     same(GYM.filter(e => e.perHand).map(e => e.id),
       ["bench_db", "incline_db", "row_db", "row_chest_db", "ohp_db", "lateral_db", "rear_fly_db", "curl_db", "hammer_db",
@@ -361,9 +361,9 @@ section("weekly splits");
   eq("the abs circuit rests 20 seconds", GROUP_DEFAULTS.abs.map(id => REST[id]), [20, 20, 20, 20, 20, 20]);
 }
 
-section("circuits, each-side exercises and first-time seconds");
+section("circuits and each-side exercises");
 {
-  const CIRCUITS = page.get("GYM_CIRCUITS"), SIDES = page.get("GYM_SIDES"), FIRST = page.get("GYM_FIRST");
+  const CIRCUITS = page.get("GYM_CIRCUITS"), SIDES = page.get("GYM_SIDES");
   const eq = (name, got, want) => check(name, same(got, want), "expected " + J(want) + "\n       got      " + J(got));
   const byId = id => GYM.find(e => e.id === id);
   const usable = id => !!byId(id) && byId(id).timed === true && GYM_RETIRED.indexOf(id) === -1;
@@ -379,9 +379,9 @@ section("circuits, each-side exercises and first-time seconds");
   check("each-side exercises: timed ones of the catalogue, none twice", Array.isArray(SIDES) && Array.from(SIDES).every(id => !!byId(id) && byId(id).timed === true) && new Set(SIDES).size === SIDES.length, J(SIDES));
   eq("the two that are done a side at a time", Array.from(SIDES), ["star_crunch", "plank_knee_elbow"]);
   check("…and their names say so", Array.from(SIDES).every(id => /each side/.test(byId(id).name)));
-  const firstBad = keys(FIRST).filter(id => !byId(id) || byId(id).timed !== true || !Number.isInteger(FIRST[id]) || FIRST[id] < byId(id).lo || FIRST[id] > byId(id).hi);
-  check("first-time seconds: timed catalogue exercises, whole seconds inside the range", !firstBad.length, firstBad.join(", "));
-  eq("the abs circuit starts at 40 seconds, 20 a side", Array.from(CIRCUITS[0]).map(id => FIRST[id]), [20, 40, 40, 20, 40, 40]);
+  check("every exercise of a circuit is done for a set time (its range is one number)", members.every(id => byId(id).lo === byId(id).hi), members.filter(id => byId(id).lo !== byId(id).hi).join(", "));
+  eq("the abs circuit: 40 seconds a set, 20 a side", Array.from(CIRCUITS[0]).map(id => byId(id).hi), [20, 40, 40, 20, 40, 40]);
+  check("a time of your own for one of them is kept as it is typed", Array.from(CIRCUITS[0]).every(id => same(M.sanitizeExercise({ id, inc: null, lo: 35, hi: 35, note: "", mts: 3 }), { id, inc: null, lo: 35, hi: 35, note: "", mts: 3 })));
 }
 
 h.done(__filename);

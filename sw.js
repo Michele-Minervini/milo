@@ -10,7 +10,7 @@
    updates the matching stamp in every script; tests/static-test.js checks
    they agree. */
 
-var VERSION = "milo-v28";
+var VERSION = "milo-v29";
 var ASSETS = [
   ".",
   "index.html",

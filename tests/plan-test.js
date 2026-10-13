@@ -252,14 +252,31 @@ section("circuits: retired or removed exercises, your own, any order, junk");
   eq("junk alone: as if nothing was logged", N(junk, "star_crunch"), { exId: "leg_flutter", set: 1, sets: 3, circuit: true });
 }
 
-section("the first time: the abs circuit starts at 40 seconds, 20 a side");
+section("a set time: the abs circuit is done for 40 seconds, 20 a side");
 {
-  const first = id => { const sg = T.suggest(id, [], NOW); return [sg.kind, sg.sets, sg.targets]; };
-  eq("each of the six", SIX.map(first), [["first", 3, [20, 20, 20]], ["first", 3, [40, 40, 40]], ["first", 3, [40, 40, 40]], ["first", 3, [20, 20, 20]], ["first", 3, [40, 40, 40]], ["first", 3, [40, 40, 40]]]);
-  eq("the plank still starts at the top of its range", first("plank"), ["first", 3, [60, 60, 60]]);
-  eq("after a session at 40: five seconds more", T.suggest("leg_flutter", [G(O(5), "leg_flutter", [40, 40, 40], 0)], NOW).targets, [45, 45, 45]);
-  T.useExercises([{ id: "leg_flutter", lo: 45, hi: 50, mts: 5 }, { id: "star_crunch", lo: 5, hi: 15, mts: 5 }]);
-  eq("a range of your own keeps the first time inside it", [first("leg_flutter")[2], first("star_crunch")[2]], [[45, 45, 45], [15, 15, 15]]);
+  const sug = (id, log) => { const sg = T.suggest(id, log || [], NOW); return [sg.kind, sg.sets, sg.targets]; };
+  eq("each of the six, before any session", SIX.map(id => sug(id)), [["fixed", 3, [20, 20, 20]], ["fixed", 3, [40, 40, 40]], ["fixed", 3, [40, 40, 40]], ["fixed", 3, [20, 20, 20]], ["fixed", 3, [40, 40, 40]], ["fixed", 3, [40, 40, 40]]]);
+  eq("which of them have a set time: the six, not the plank or a weighted exercise", SIX.concat(["plank", "hold_failure", "bench_db", "nope", null]).map(id => T.fixedTime(id)),
+    [true, true, true, true, true, true, false, false, false, false, false]);
+  eq("after a session at 40: still 40, Milo doesn't raise it", sug("leg_flutter", [G(O(5), "leg_flutter", [40, 40, 40], 0)]), ["fixed", 3, [40, 40, 40]]);
+  eq("after sets cut short or run long: still 40", sug("leg_flutter", [G(O(5), "leg_flutter", [23, 40, 55], 0)]), ["fixed", 3, [40, 40, 40]]);
+  eq("as many sets as last time", [sug("leg_flutter", [G(O(5), "leg_flutter", [40, 40], 0)]), sug("leg_flutter", [G(O(5), "leg_flutter", Array(14).fill(40), 0)])[1]], [["fixed", 2, [40, 40]], 10]);
+  eq("after a long break: the same time", sug("leg_flutter", [G(new Date(2026, 5, 1, 12).getTime(), "leg_flutter", [40, 40, 40], 0)]), ["fixed", 3, [40, 40, 40]]);
+  eq("the session it builds on is named", T.suggest("leg_flutter", [G(O(5), "leg_flutter", [40, 40, 40], 0, { id: "last" })], NOW).from.id, "last");
+  eq("the sheet opens with last time's rows, each at the set time", T.planRows("leg_flutter", [G(O(5), "leg_flutter", [23, 40, 55], 0)], NOW).map(r => [r.reps, r.warm]), [[40, false], [40, false], [40, false]]);
+  eq("the plank keeps its range: 60 the first time, then five seconds more", [sug("plank"), sug("plank", [G(O(5), "plank", [40, 40, 40], 0)])], [["first", 3, [60, 60, 60]], ["reps", 3, [45, 45, 45]]]);
+
+  T.useExercises([{ id: "leg_flutter", inc: null, lo: 30, hi: 30, note: "", mts: 5 }, { id: "star_crunch", inc: null, lo: 15, hi: 15, note: "", mts: 5 }]);
+  eq("a time of your own: 30 from the first set", [sug("leg_flutter"), sug("leg_flutter", [G(O(5), "leg_flutter", [40, 40, 40], 0)]), sug("star_crunch")],
+    [["fixed", 3, [30, 30, 30]], ["fixed", 3, [30, 30, 30]], ["fixed", 3, [15, 15, 15]]]);
+  eq("…and the others keep theirs", sug("bicycle"), ["fixed", 3, [40, 40, 40]]);
+  T.useExercises([{ id: "leg_flutter", inc: null, lo: 30, hi: 50, note: "", mts: 6 }]);
+  eq("a range of your own makes it build up again: 50 the first time, then five seconds more", [T.fixedTime("leg_flutter"), sug("leg_flutter"), sug("leg_flutter", [G(O(5), "leg_flutter", [40, 40, 40], 0)])],
+    [false, ["first", 3, [50, 50, 50]], ["reps", 3, [45, 45, 45]]]);
+  T.useExercises([{ id: "plank", inc: null, lo: 45, hi: 45, note: "", mts: 7 }, { id: "x_hollow", name: "Hollow hold", group: "abs", sec: [], equip: "bodyweight", load: "bw", timed: true, perHand: false, inc: 2.5, lo: 25, hi: 25, note: "", del: false, mts: 7 },
+    { id: "bench_db", inc: null, lo: 10, hi: 10, note: "", mts: 7 }]);
+  eq("any timed exercise given one number is done for that time: the plank, one of your own", [sug("plank", [G(O(5), "plank", [60, 50, 40], 0)]), sug("x_hollow")], [["fixed", 3, [45, 45, 45]], ["fixed", 3, [25, 25, 25]]]);
+  eq("…but reps are never a set time: a weighted exercise with one number still goes up", T.suggest("bench_db", [G(O(5), "bench_db", [10, 10, 10], 20)], NOW).kind, "up");
   T.useExercises([]);
 }
 

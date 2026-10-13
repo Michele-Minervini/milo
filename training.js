@@ -35,7 +35,7 @@
 
    Reads the tables in data.js (AREAS, GROUP_INFO, AREA_GROUPS,
    VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED, SPLITS,
-   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES, GYM_FIRST) and the
+   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES) and the
    calendar-day helpers and sanitizeExercise in model.js, so it
    loads after both and before app.js.
 
@@ -57,7 +57,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v28";
+  var BUILD = "milo-v29";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -81,7 +81,6 @@ var TRAINING = (function () {
   var START = GROUP_DEFAULTS;
   var CIRCUITS = GYM_CIRCUITS;
   var SIDED = GYM_SIDES;
-  var FIRST_SECS = GYM_FIRST;
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
@@ -1347,13 +1346,8 @@ var TRAINING = (function () {
     return out;
   }
 
-  // What a first session aims for: the top of the range — or, for a timed
-  // exercise with a starting time of its own (data.js, GYM_FIRST), that
-  // time, kept inside the range (which may have been changed).
-  function firstTarget(ex) {
-    var t = ex.timed && own(FIRST_SECS, ex.id) ? Math.round(Number(FIRST_SECS[ex.id])) : NaN;
-    return t >= 1 ? Math.max(ex.lo, Math.min(ex.hi, t)) : ex.hi;
-  }
+  // A timed exercise done for a set time: its range is one number.
+  function fixedTime(ex) { return !!ex && !!ex.timed && ex.lo === ex.hi; }
 
   // The double-progression suggestion for the next session of an exercise,
   // from its sessions on days before now's (today's entries and
@@ -1366,9 +1360,12 @@ var TRAINING = (function () {
   //   targets  one per set (seconds when timed)
   // W is the last session's top weight (sessionTop). kind, checked in
   // this order:
+  //   "fixed"   a timed exercise whose range is one number (lo = hi): it
+  //             is done for exactly that long, so every set aims for it,
+  //             whatever last time was — as many sets as last time (3 when
+  //             none). The time changes when its range does, not by itself.
   //   "first"   no earlier session, or ext with W = 0: kg null, 3 sets of
-  //             hi ("pick a weight you could lift about hi + 2 times"); a
-  //             timed exercise with a starting time of its own: 3 of that
+  //             hi ("pick a weight you could lift about hi + 2 times")
   //   "return"  more than 42 calendar days since the last session: 90 %
   //             of W rounded down to inc (never 0: then W); assisted: W +
   //             10 % rounded up to inc; reps mode: W. Targets lo.
@@ -1403,7 +1400,11 @@ var TRAINING = (function () {
       return { kind: kind, kg: kg, sets: n, targets: targets, from: last ? { id: last.id, ts: last.ts, kg: last.W, reps: last.at.slice() } : null };
     };
     var mode = weightMode(ex);
-    if (!last || (mode === "load" && ex.load === "ext" && !(last.W > 0))) return make("first", null, DEFAULT_SETS, fill(last ? hi : firstTarget(ex), DEFAULT_SETS));
+    if (fixedTime(ex)) {
+      var sets = last ? Math.max(1, Math.min(MAX_SETS, last.n)) : DEFAULT_SETS;
+      return make("fixed", last ? last.W : null, sets, fill(hi, sets));
+    }
+    if (!last || (mode === "load" && ex.load === "ext" && !(last.W > 0))) return make("first", null, DEFAULT_SETS, fill(hi, DEFAULT_SETS));
     var W = last.W;
     if (!(W > 0)) mode = "reps";   // added or assisted with no weight on: bodyweight
     var n = Math.max(1, Math.min(MAX_SETS, last.n));
@@ -2529,6 +2530,7 @@ var TRAINING = (function () {
     splits: splits,
     splitState: splitState,
     eachSide: eachSide,
+    fixedTime: function (exId) { return fixedTime(exRec(exId)); },
     circuitOf: circuitOf,
     circuitNext: circuitNext,
     PLAN_LOOKBACK: PLAN_LOOKBACK,

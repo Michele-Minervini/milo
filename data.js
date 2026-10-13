@@ -8,7 +8,7 @@
    ============================================================ */
 
 /* Build stamp: app.js refuses to run on files from two different releases. */
-const DATA_BUILD = "milo-v28";
+const DATA_BUILD = "milo-v29";
 
 const AREAS = [
   {
@@ -1356,13 +1356,15 @@ const GYM_EXERCISES = [
   { id: "hold_failure",     name: "Hold till failure",     p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 120, inc: 2.5, perHand: false, load: "bw",   timed: true },
   // An abs circuit on the floor, each one done for time (seconds are logged,
   // not reps): one set of each, a short rest (GYM_REST), three rounds. The
-  // "each side" ones are timed per side.
-  { id: "star_crunch",      name: "Star crunch, each side",         p: "abs", s: [], equip: "bodyweight", lo: 15, hi: 40, inc: 2.5, perHand: false, load: "bw", timed: true },
-  { id: "leg_flutter",      name: "Leg flutters",                   p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true },
-  { id: "bicycle",          name: "Bicycles",                       p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true },
-  { id: "plank_knee_elbow", name: "Plank knee to elbow, each side", p: "abs", s: [], equip: "bodyweight", lo: 15, hi: 40, inc: 2.5, perHand: false, load: "bw", timed: true },
-  { id: "boat_hold",        name: "Boat hold",                      p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true },
-  { id: "seated_in_out",    name: "Seated in & outs",               p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 60, inc: 2.5, perHand: false, load: "bw", timed: true },
+  // "each side" ones are timed per side. lo = hi: a set is done for exactly
+  // that long (40 seconds, 20 a side) until the time is changed by hand —
+  // a range would have the suggestions raise it session by session.
+  { id: "star_crunch",      name: "Star crunch, each side",         p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 20, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "leg_flutter",      name: "Leg flutters",                   p: "abs", s: [], equip: "bodyweight", lo: 40, hi: 40, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "bicycle",          name: "Bicycles",                       p: "abs", s: [], equip: "bodyweight", lo: 40, hi: 40, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "plank_knee_elbow", name: "Plank knee to elbow, each side", p: "abs", s: [], equip: "bodyweight", lo: 20, hi: 20, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "boat_hold",        name: "Boat hold",                      p: "abs", s: [], equip: "bodyweight", lo: 40, hi: 40, inc: 2.5, perHand: false, load: "bw", timed: true },
+  { id: "seated_in_out",    name: "Seated in & outs",               p: "abs", s: [], equip: "bodyweight", lo: 40, hi: 40, inc: 2.5, perHand: false, load: "bw", timed: true },
   // Legs
   { id: "squat_bb",      name: "Back squat",                 p: "legs",      s: [],                    equip: "barbell",    lo: 5,  hi: 8,  inc: 2.5, perHand: false, load: "ext",    timed: false },
   { id: "leg_press",     name: "Leg press",                  p: "legs",      s: [],                    equip: "machine",    lo: 8,  hi: 12, inc: 5,   perHand: false, load: "ext",    timed: false },
@@ -1419,12 +1421,6 @@ const GYM_CIRCUITS = [
 /* Timed exercises whose set is one side, then the other: the seconds are
    per side, so a countdown runs twice, with a moment to switch between. */
 const GYM_SIDES = ["star_crunch", "plank_knee_elbow"];
-
-/* The seconds a timed exercise aims for the first time, where that isn't
-   the top of its range: the abs circuit starts at 40 seconds, 20 a side. */
-const GYM_FIRST = {
-  star_crunch: 20, leg_flutter: 40, bicycle: 40, plank_knee_elbow: 20, boat_hold: 40, seated_in_out: 40
-};
 
 /* ---------- Weekly splits: the plan (P6) ----------
 

@@ -24,7 +24,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v28";
+  var BUILD = "milo-v29";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -1241,7 +1241,7 @@
                       once. A device with nothing on it at its first launch
                       is given NEWS straight away and never sees it.
        milo.come      "done" once "Coming from another device?" is answered. */
-  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v28";
+  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v29";
   // Dismissed in this page view: holds even where the flag can't be stored.
   var newsSeen = false;
   function flag(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
@@ -1374,7 +1374,7 @@
     var sg = gymSuggestion(it.exId, null);
     var kg = sg && hasKg(ex) && sg.kg > 0 ? " · " + fmtW(sg.kg) + (ex.load === "assist" ? " kg assist" : (ex.load === "added" ? " kg added" : " kg")) : "";
     return (it.done && !it.complete ? it.done + " of " + it.sets + " sets done · " : "") +
-      it.sets + " × " + ex.lo + "–" + ex.hi + (ex.timed ? " sec" : "") + kg;
+      it.sets + " × " + rangeText(ex) + (ex.timed ? " sec" : "") + kg;
   }
   // Roughly how long what is left takes: each set's work and its rest, and a
   // minute per exercise to set up. To the nearest 5 minutes.
@@ -1383,7 +1383,9 @@
     items.forEach(function (it) {
       if (it.complete) return;
       var ex = TRAINING.exercise(it.exId);
-      sec += 60 + (it.sets - it.done) * ((ex.timed ? Math.round((ex.lo + ex.hi) / 2) : 40) + restFor(ex));
+      var work = ex.timed ? Math.round((ex.lo + ex.hi) / 2) : 40;
+      if (TRAINING.eachSide(ex.id)) work = work * 2 + CLOCK_SWITCH;
+      sec += 60 + (it.sets - it.done) * (work + restFor(ex));
     });
     return Math.max(5, Math.round(sec / 300) * 5);
   }
@@ -1450,7 +1452,7 @@
   function whatsNewLineHTML() {
     return '<div class="today-card wnline">' +
       '<button class="wn-open" id="whatsNewBtn" type="button">' + ico("&#10024;") +
-      '<span class="wn-text"><b>A countdown for timed sets.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<span class="wn-text"><b>Your own times for the abs circuit.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
       '<button class="nc-x" id="whatsNewX" type="button" aria-label="Hide what&#8217;s new">&#10005;</button></div>';
   }
 
@@ -2975,6 +2977,8 @@
   function whatsNewPaneHTML() {
     return sheetHead({ title: ico("&#10024;") + "What&#8217;s new in Milo", sub: "Once, after this update" }) +
       '<div class="sheet-body volinfo whatsnew">' +
+      "<h4>Your own times for the abs circuit</h4><p>Each of the six is done for a set time: 40 seconds, 20 a side, until you change it. In the exercise, <b>Seconds per set</b> has &#8722; and &#43;; " +
+      "<b>All the circuit&#8217;s times and its rest</b> shows the six together, with the rest between sets. A time stays as you set it: Milo no longer adds 5 seconds by itself.</p>" +
       "<h4>A countdown for timed sets</h4><p>An exercise logged in seconds now has a <b>&#9654;</b> on each set: 5 seconds to get ready, then the countdown, once for each side where that applies. " +
       "At zero the set is ticked and the rest starts. With <b>Hands-free</b> on (it is, until you untick it in the exercise) Milo carries on by itself after each rest: " +
       "round the six abs exercises as a circuit, or the next set of any other timed exercise. <b>Pause</b> and <b>Stop</b> are always there. " +
@@ -3215,6 +3219,10 @@
   function exColor(ex) { return ex ? groupColorVar(ex.p) : "var(--axis)"; }
   function hasKg(ex) { return !ex || ex.load !== "bw"; }
   function repUnit(ex) { return ex && ex.timed ? "sec" : "reps"; }
+  // "8–12", or "40" for a range that is one number (a set time).
+  function rangeText(ex) { return ex.lo === ex.hi ? String(ex.lo) : ex.lo + "–" + ex.hi; }
+  // A timed exercise done for a set time: its range is one number.
+  function fixedTime(ex) { return !!ex && !!ex.timed && ex.lo === ex.hi; }
   function fmtW(x) { return fmtKg(x); }
 
   // "Chest · helps arms, shoulders · dumbbells · kg per hand"
@@ -3300,7 +3308,7 @@
     var last = TRAINING.lastSession(state.log, ex.id, {});
     var when = last ? dayLabel(last.ts) : "";
     var sub = last ? (when === "Today" ? "Today" : "Last " + esc(when)) + ": " + esc(lastSetsText(ex, last))
-      : esc((EQUIP_NAME[ex.equip] || ex.equip) + " · " + ex.lo + "–" + ex.hi + " " + repUnit(ex));
+      : esc((EQUIP_NAME[ex.equip] || ex.equip) + " · " + rangeText(ex) + " " + repUnit(ex));
     return '<button class="librow exrow" type="button" data-ex="' + esc(ex.id) + '" data-name="' + esc(searchKey(ex.name)) + '" data-stem="' + esc(searchStem(ex.name)) + '" style="--area:' + exColor(ex) + '">' +
       '<span class="libinfo"><span class="libname">' + esc(ex.name) + (ex.custom ? ' <span class="exmine">yours</span>' : "") + "</span>" +
       '<span class="libsub">' + sub + '</span></span><span class="chev" aria-hidden="true">&#8250;</span></button>';
@@ -3436,7 +3444,17 @@
 
   // The rest a ticked set starts: the gym rest from Settings, or the
   // exercise's own when that is shorter (data.js, GYM_REST: the abs circuit).
+  // An exercise of a circuit: the rest chosen for circuits on this device
+  // (Circuit times), when there is one.
+  var CIRCUIT_REST_KEY = "milo.circuitRest";
+  var SECS_MIN = 5, SECS_MAX = 600, SECS_STEP = 5, REST_MAX = 300;
+  function circuitRest() {
+    var raw = flag(CIRCUIT_REST_KEY), n = raw === null ? NaN : Math.round(Number(raw));
+    return n >= SECS_MIN && n <= REST_MAX ? n : null;
+  }
   function restFor(ex) {
+    var chosen = ex && TRAINING.circuitOf(ex.id) ? circuitRest() : null;
+    if (chosen !== null) return chosen;
     var own = ex && Object.prototype.hasOwnProperty.call(GYM_REST, ex.id) ? GYM_REST[ex.id] : Infinity;
     return Math.min(state.settings.restGym, own);
   }
@@ -3546,8 +3564,7 @@
     var text;
     switch (sg.kind) {
       case "first":
-        if (ex.timed && t.length && t[0] < ex.hi) text = "First time: " + (sg.sets || 3) + " sets of " + t[0] + " seconds" + (TRAINING.eachSide(ex.id) ? " a side" : "") + ".";
-        else if (ex.timed) text = "First time: " + (sg.sets || 3) + " sets, each as long as you can with good form, up to " + ex.hi + " seconds.";
+        if (ex.timed) text = "First time: " + (sg.sets || 3) + " sets, each as long as you can with good form, up to " + ex.hi + " seconds.";
         else if (ex.load === "ext") text = "First time: pick a weight you could lift about " + (ex.hi + 2) + " times, and do " + (sg.sets || 3) + " sets of " + ex.hi + ".";
         else if (ex.load === "assist") text = "First time: pick the help that lets you do about " + (ex.hi + 2) + " good reps, and do " + (sg.sets || 3) + " sets of " + ex.hi + ".";
         else text = "First time: " + (sg.sets || 3) + " sets at bodyweight, as many good reps as you can, up to " + ex.hi + ".";
@@ -3579,19 +3596,90 @@
   // per row (r.hint). Otherwise the suggested reps go to the counted sets:
   // the k-th row that isn't a warm-up gets the k-th target; a warm-up row
   // gets none. A suggestion is for today's workout; on a past day's entry it
-  // would be about the wrong day.
+  // would be about the wrong day. An exercise done for a set time: every
+  // counted set aims for it as it is now — a copy's numbers are from when
+  // the sheet opened, and the time may have been changed since.
   function gymTargets(d) {
-    var sg = d.date === quickDays().today ? gymSuggestion(d.exId, d.entryId) : null;
+    var today = d.date === quickDays().today, ex = TRAINING.exercise(d.exId);
+    var sg = today ? gymSuggestion(d.exId, d.entryId) : null;
     var targets = sg && sg.targets ? sg.targets : [];
     var copied = d.rows.some(function (r) { return r.hint != null; });
+    var fixed = today && fixedTime(ex);
     var counted = 0;
     return {
       sg: sg, copied: copied, any: targets.length > 0,
       rows: d.rows.map(function (r) {
-        var t = copied ? r.hint : (r.warm ? null : targets[counted++]);
+        var t = fixed && !r.warm ? ex.hi : (copied ? r.hint : (r.warm ? null : targets[counted++]));
         return t == null ? null : t;
       })
     };
+  }
+
+  // A row with a − / + stepper for a number of seconds. key: an exercise's
+  // id (the time its sets are done for) or "rest" (the circuit's rest).
+  function secsRowHTML(key, label, val, max) {
+    var id = "secs_" + key;
+    return '<div class="volrow secsrow"><span class="vlab" id="' + id + 'L">' + label + "</span>" +
+      '<span class="stepper"><button type="button" class="stepbtn" data-secs="' + esc(key) + '" data-dir="-1" aria-label="' + SECS_STEP + ' seconds less">&#8722;</button>' +
+      '<input class="stepval" type="text" inputmode="numeric" id="' + id + '" data-secs-in="' + esc(key) + '" data-max="' + max + '" value="' + val + '" aria-labelledby="' + id + 'L">' +
+      '<button type="button" class="stepbtn" data-secs="' + esc(key) + '" data-dir="1" aria-label="' + SECS_STEP + ' seconds more">&#43;</button></span></div>';
+  }
+  // An exercise's set time is its range, as one number: your own value for
+  // it, saved and synced like any change to an exercise.
+  function saveSecs(key, n) {
+    if (key === "rest") { setFlag(CIRCUIT_REST_KEY, String(n)); return true; }
+    return saveExerciseField(key, { lo: n, hi: n });
+  }
+  // The steppers of secsRowHTML, in any sheet. − and + go to the next
+  // multiple of 5; a typed number is taken as it is, within the limits.
+  function wireSecs(sheet) {
+    var set = function (key, value, focusSel) {
+      var inp = $('[data-secs-in="' + key + '"]', sheet), n = Math.round(Number(String(value).trim()));
+      if (String(value).trim() === "" || !isFinite(n)) { toast("That isn't a number of seconds"); renderSheet(); return; }
+      n = Math.max(SECS_MIN, Math.min(Number(inp.getAttribute("data-max")), n));
+      var top = uiStack[uiStack.length - 1];
+      if (top && top.t === "gym") { readGymInputs(sheet); saveGymDraft(); }
+      saveSecs(key, n);
+      renderSheet();
+      focusIn($("#sheet"), focusSel);
+    };
+    sheet.querySelectorAll("button[data-secs]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var key = b.getAttribute("data-secs"), dir = Number(b.getAttribute("data-dir"));
+        var cur = Math.round(Number($('[data-secs-in="' + key + '"]', sheet).value)) || 0;
+        var next = dir > 0 ? Math.floor(cur / SECS_STEP) * SECS_STEP + SECS_STEP : Math.ceil(cur / SECS_STEP) * SECS_STEP - SECS_STEP;
+        set(key, next, 'button[data-secs="' + key + '"][data-dir="' + dir + '"]');
+      });
+    });
+    sheet.querySelectorAll("[data-secs-in]").forEach(function (inp) {
+      inp.addEventListener("change", function () { var key = inp.getAttribute("data-secs-in"); set(key, inp.value, '[data-secs-in="' + key + '"]'); });
+    });
+  }
+  // In today's sheet of an exercise done for a set time: the time, to change
+  // there and then, and for one of a circuit the way to all its times.
+  function setTimeHTML(ex) {
+    return secsRowHTML(ex.id, TRAINING.eachSide(ex.id) ? "Seconds per side" : "Seconds per set", ex.hi, SECS_MAX) +
+      (TRAINING.circuitOf(ex.id) ? '<button type="button" class="linkbtn circlink" id="circuitTimesBtn">All the circuit&#8217;s times and its rest &#8250;</button>' : "");
+  }
+
+  /* ---- Circuit times: every exercise's seconds, and the rest ---- */
+
+  function openCircuitTimes(exId) { pushView({ t: "circuit", x: exId }); }
+  function circuitPaneHTML(exId) {
+    var ring = TRAINING.circuitOf(exId), first = TRAINING.exercise(ring[0]);
+    var rows = ring.map(function (id) {
+      var ex = TRAINING.exercise(id);
+      return fixedTime(ex) ? secsRowHTML(id, esc(ex.name), ex.hi, SECS_MAX)
+        : '<div class="volrow secsrow"><span class="vlab">' + esc(ex.name) + '</span><span class="secsfree">' + rangeText(ex) + " sec, building up</span></div>";
+    }).join("");
+    return sheetHead({ title: "Circuit times", sub: ring.length + " exercises &middot; one set of each, then round again" }) +
+      '<div class="sheet-body circuitpane" style="--area:' + exColor(first) + '">' +
+      "<h4>Seconds per set</h4>" + rows +
+      '<p class="hint">For an &#8220;each side&#8221; exercise the seconds are for one side. A time stays as you set it, on every device you sync: Milo doesn&#8217;t raise it by itself.</p>' +
+      "<h4>Rest</h4>" + secsRowHTML("rest", "Rest between sets", restFor(first), REST_MAX) +
+      '<p class="hint">' + (circuitRest() === null ? "The circuit&#8217;s usual 20 seconds, or your gym rest from Settings if that is shorter. A rest set here is kept on this device."
+        : "Kept on this device.") + "</p>" +
+      "</div>";
   }
 
   // A set can be counted down: a timed exercise, in today's sheet.
@@ -3646,6 +3734,7 @@
       (last ? '<p class="glast"><b>Last time</b> &middot; ' + esc(dayLabel(last.ts)) + ": " + esc(lastSetsText(ex, last)) + "</p>" : "") +
       '<div id="gymRec">' + gymRecHTML(d, ex) + "</div>" +
       suggestionHTML(ex, sg) +
+      (play && fixedTime(ex) ? setTimeHTML(ex) : "") +
       '<ol class="gsets" aria-label="Sets">' + rows + "</ol>" +
       (play ? handsFreeHTML(d.exId) : "") +
       '<p class="hint gtip">Tick &#10003; each set as you finish it: it&#8217;s saved straight away' +
@@ -3910,6 +3999,9 @@
 
     var hf = $("#handsFreeChk", sheet);
     if (hf) hf.addEventListener("change", function () { setFlag(HANDS_FREE_KEY, hf.checked ? "on" : "off"); });
+    wireSecs(sheet);
+    var ct = $("#circuitTimesBtn", sheet);
+    if (ct) ct.addEventListener("click", function () { readGymInputs(sheet); saveGymDraft(); openCircuitTimes(d.exId); });
     var add = $("#gymAddSet", sheet);
     if (add) add.addEventListener("click", function () {
       readGymInputs(sheet);
@@ -4430,7 +4522,10 @@
       "<h4>Your numbers</h4>" + numbers +
       exerciseChartHTML(ex) +
       "<h4>For this exercise</h4>" +
-      "<p>The suggestions aim for " + ex.lo + "&#8211;" + ex.hi + " " + unit + " a set" + (hasKg(ex) ? ", and go up " + fmtW(ex.inc) + " kg at a time" : "") + ". Change them if your gym or your body say otherwise.</p>" +
+      (fixedTime(ex)
+        ? "<p>Each set is done for " + ex.hi + " sec" + (TRAINING.eachSide(ex.id) ? " a side" : "") + ", and the time stays until you change it. Give it two different numbers and Milo builds the time up from the fewer to the more, 5 seconds a session.</p>"
+        : "<p>The suggestions aim for " + ex.lo + "&#8211;" + ex.hi + " " + unit + " a set" + (hasKg(ex) ? ", and go up " + fmtW(ex.inc) + " kg at a time" : "") + ". Change them if your gym or your body say otherwise." +
+          (ex.timed ? " Give both the same number and every set is done for exactly that time." : "") + "</p>") +
       stepper("exLo", "Fewest " + unit, ex.lo, 1, 600, 1) +
       stepper("exHi", "Most " + unit, ex.hi, 1, 600, 1) +
       (hasKg(ex) ? stepper("exInc", "Weight step (kg)", fmtW(ex.inc), 0.25, 50, 0.25) : "") +
@@ -4802,6 +4897,7 @@
       case "day": return dayLabel(dateFromKey(v.d));
       case "quick": return "Quick gym log";
       case "volinfo": return "How it's counted";
+      case "circuit": return "Circuit times";
       case "group": return groupName(v.x);
       case "logpick": return "Log";
       case "logskill": return "Skill session";
@@ -4932,6 +5028,7 @@
     else if (view.t === "library") sheet.innerHTML = libraryPaneHTML();
     else if (view.t === "quick") sheet.innerHTML = quickPaneHTML();
     else if (view.t === "volinfo") sheet.innerHTML = volInfoPaneHTML();
+    else if (view.t === "circuit" && TRAINING.circuitOf(view.x)) sheet.innerHTML = circuitPaneHTML(view.x);
     else if (view.t === "group" && GROUP_INFO[view.x]) sheet.innerHTML = groupPaneHTML(view.x);
     else if (view.t === "logpick") sheet.innerHTML = logPickPaneHTML();
     else if (view.t === "logskill") sheet.innerHTML = logSkillPaneHTML();
@@ -5958,6 +6055,7 @@
 
     if (view.t === "gympick") wireGymPick(sheet);
     if (view.t === "gym") wireGym(sheet);
+    if (view.t === "circuit") wireSecs(sheet);
     if (view.t === "exercise") wireExercise(sheet, view.x);
     if (view.t === "exform") wireExForm(sheet);
 
