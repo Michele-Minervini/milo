@@ -317,6 +317,9 @@ section("circuits: which exercises go round together");
   eq("the six abs exercises are one circuit, whichever of them you ask from", SIX.map(id => T.circuitOf(id)), SIX.map(() => SIX));
   eq("any other exercise is in none: timed or not, unknown, or not an id", ["plank", "hold_failure", "bench_db", "nope", "__proto__", "", null, undefined, 7, {}].map(id => T.circuitOf(id)),
     [null, null, null, null, null, null, null, null, null, null]);
+  eq("held as long as you can: Hold till failure, and nothing else", ["hold_failure", "plank", "star_crunch", "wall_sit", "bench_db", "nope", null, 7, {}].map(id => T.toFailure(id)),
+    [true, false, false, false, false, false, false, false, false]);
+  eq("…its next set after one: itself, as for any exercise in no circuit", N([G(NOW - 60000, "hold_failure", [45], 0)], "hold_failure"), { exId: "hold_failure", set: 2, sets: 3, circuit: false });
   eq("each side: the two that say so, and nothing else", SIX.concat(["plank", "knee_raise_side", "nope", null]).map(id => T.eachSide(id)),
     [true, false, false, true, false, false, false, false, false, false]);
 }

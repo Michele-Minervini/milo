@@ -35,7 +35,7 @@
 
    Reads the tables in data.js (AREAS, GROUP_INFO, AREA_GROUPS,
    VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED, SPLITS,
-   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES, BODYWEIGHT_DEFAULTS,
+   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES, GYM_TO_FAILURE, BODYWEIGHT_DEFAULTS,
    SKILL_SIDE) and the
    calendar-day helpers and sanitizeExercise in model.js, so it
    loads after both and before app.js.
@@ -58,7 +58,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v30";
+  var BUILD = "milo-v31";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -84,6 +84,7 @@ var TRAINING = (function () {
   var BODY_START = BODYWEIGHT_DEFAULTS;
   var SKILL_SIDES = SKILL_SIDE;
   var SIDED = GYM_SIDES;
+  var TO_FAILURE = GYM_TO_FAILURE;
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
@@ -2329,6 +2330,13 @@ var TRAINING = (function () {
     return !!ex && !!ex.timed && Array.isArray(SIDED) && SIDED.indexOf(exId) !== -1;
   }
 
+  // Whether a timed exercise is held as long as you can (data.js,
+  // GYM_TO_FAILURE): its clock counts up. Never one done a side at a time.
+  function toFailure(exId) {
+    var ex = exRec(exId);
+    return !!ex && !!ex.timed && Array.isArray(TO_FAILURE) && TO_FAILURE.indexOf(exId) !== -1 && !eachSide(exId);
+  }
+
   // The circuit an exercise is in (data.js, GYM_CIRCUITS): its exercises that
   // can be done now — known, timed, not removed or retired — in order. null
   // when it is in none, or would be alone in it.
@@ -2641,6 +2649,7 @@ var TRAINING = (function () {
     splits: splits,
     splitState: splitState,
     eachSide: eachSide,
+    toFailure: toFailure,
     fixedTime: function (exId) { return fixedTime(exRec(exId)); },
     circuitOf: circuitOf,
     circuitNext: circuitNext,

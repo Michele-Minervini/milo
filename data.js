@@ -8,7 +8,7 @@
    ============================================================ */
 
 /* Build stamp: app.js refuses to run on files from two different releases. */
-const DATA_BUILD = "milo-v30";
+const DATA_BUILD = "milo-v31";
 
 const AREAS = [
   {
@@ -1428,6 +1428,12 @@ const GYM_CIRCUITS = [
 /* Timed exercises whose set is one side, then the other: the seconds are
    per side, so a countdown runs twice, with a moment to switch between. */
 const GYM_SIDES = ["star_crunch", "plank_knee_elbow"];
+
+/* Timed exercises held as long as you can, not for a set time: their clock
+   counts up from 0 until you tap Done, and the number in the box is the one
+   to pass. None is done a side at a time, has a set time (lo = hi) or is in
+   a circuit (tests/data-test.js). */
+const GYM_TO_FAILURE = ["hold_failure"];
 
 /* ---------- Weekly splits: the plan (P6) ----------
 

@@ -24,7 +24,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v30";
+  var BUILD = "milo-v31";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -699,7 +699,7 @@
   var REST_NOTIFY_KEY = "milo.restNotify";
   var REST_NOTE_TITLE = "Rest over";
   // Every title Milo sends: the rest's, and the countdown's steps.
-  var NOTE_TITLES = [REST_NOTE_TITLE, "Go", "Switch sides", "Set done"];
+  var NOTE_TITLES = [REST_NOTE_TITLE, "Go", "Switch sides", "Set done", "Past your target"];
   function canNotify() {
     return typeof Notification !== "undefined" && typeof Notification.requestPermission === "function" && !!navigator.serviceWorker;
   }
@@ -1252,7 +1252,7 @@
                       once. A device with nothing on it at its first launch
                       is given NEWS straight away and never sees it.
        milo.come      "done" once "Coming from another device?" is answered. */
-  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v30";
+  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v31";
   // Dismissed in this page view: holds even where the flag can't be stored.
   var newsSeen = false;
   function flag(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
@@ -1490,7 +1490,7 @@
   function whatsNewLineHTML() {
     return '<div class="today-card wnline">' +
       '<button class="wn-open" id="whatsNewBtn" type="button">' + ico("&#10024;") +
-      '<span class="wn-text"><b>Gym or Bodyweight: one plan, two ways.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<span class="wn-text"><b>Hold till failure: a clock that counts up.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
       '<button class="nc-x" id="whatsNewX" type="button" aria-label="Hide what&#8217;s new">&#10005;</button></div>';
   }
 
@@ -3023,6 +3023,8 @@
   function whatsNewPaneHTML() {
     return sheetHead({ title: ico("&#10024;") + "What&#8217;s new in Milo", sub: "Once, after this update" }) +
       '<div class="sheet-body volinfo whatsnew">' +
+      "<h4>Hold till failure counts up</h4><p>Its <b>&#9654;</b> now starts a clock that counts up from 0. It beeps when you pass the number in the box; " +
+      "tap <b>Done &#10003;</b> when you can&#8217;t hold any longer, and the seconds you held are logged and the rest starts. Hands-free carries on to the next set as before.</p>" +
       "<h4>Gym or Bodyweight</h4><p>Today&#8217;s plan has a switch. <b>Bodyweight</b> keeps your split and the day you are on, and lists what you can do without a gym: " +
       "the skills that train that day&#8217;s muscles, at the step you are on, then bodyweight exercises (push-ups, pull-ups, dips, lunges&#8230;). " +
       "Each mode keeps its own list, so your gym exercises are there when you switch back. A Skills session now counts as training that day of the plan.</p>" +
@@ -3738,8 +3740,11 @@
   // Under a timed exercise's sets: what the play button does, and hands-free.
   function handsFreeHTML(exId) {
     var ring = TRAINING.circuitOf(exId);
-    return '<p class="hint gtip"><b>&#9654;</b> counts a set down for you: ' + CLOCK_READY + " seconds to get ready, then the seconds in its box" +
-      (TRAINING.eachSide(exId) ? ", once for each side" : "") + ". At zero the set is ticked and the rest starts.</p>" +
+    return '<p class="hint gtip">' + (TRAINING.toFailure(exId)
+      ? "<b>&#9654;</b> times a hold: " + CLOCK_READY + " seconds to get ready, then the clock counts up until you tap <b>Done</b>. " +
+        "A beep tells you when you pass the number in the box; the seconds you held are logged and the rest starts.</p>"
+      : "<b>&#9654;</b> counts a set down for you: " + CLOCK_READY + " seconds to get ready, then the seconds in its box" +
+        (TRAINING.eachSide(exId) ? ", once for each side" : "") + ". At zero the set is ticked and the rest starts.</p>") +
       '<label class="exchk"><input type="checkbox" id="handsFreeChk"' + (handsFreeOn() ? " checked" : "") + "> Hands-free: carry on by itself after each rest</label>" +
       '<p class="hint ghf">' + (ring
         ? "Round the circuit, one set of each, then round again: " + ring.map(function (id) { return esc(exName(id)); }).join(" &#8594; ") + "."
@@ -4142,6 +4147,11 @@
      the circuit's next exercise or the same exercise's next set
      (TRAINING.circuitNext), until nothing is left.
 
+     An exercise held as long as you can (TRAINING.toFailure: Hold till
+     failure) counts up instead: the "hold" phase has no end, the number in
+     the box is the one to pass (a signal when it is), and Done ends the set
+     with the seconds held.
+
      Every step has its signal: a beep and, with the rest notification on,
      the banner that makes an iPhone buzz. Eyes are not on the phone.
 
@@ -4155,9 +4165,12 @@
   var CLOCK_SWITCH = 3;     // seconds to change sides
   var CLOCK_TICK = 200;     // ms between two looks at the time
   var CLOCK_GAP = 1500;     // ms without a look: nothing was running meanwhile
+  var HOLD_MAX = 3600;      // seconds a hold is ended at, Done or not (what a set can hold)
   // { d: the gym draft it runs in, row, secs, chain: hands-free,
-  //   phases: [{ k: "ready" | "work" | "switch" | "rest", s: seconds, side: 0 | 1 | 2 }], at,
-  //   end: when the phase ends (ms), last: the last look, paused: null or the ms left,
+  //   phases: [{ k: "ready" | "work" | "switch" | "hold" | "rest", s: seconds, side: 0 | 1 | 2 }], at,
+  //   end: when the phase ends (ms; Infinity for a hold), begin: when a hold began (ms),
+  //   passed: the hold has gone past its target, last: the last look,
+  //   paused: null, or the ms left (a hold: the ms held),
   //   beeped: the last second counted in, next: what follows the rest,
   //   sets: how many the exercise is to get today when the clock knows (0: as many as the sheet has rows), timer }
   var workClock = null;
@@ -4166,6 +4179,7 @@
   function clockFor(d) { return workClock && workClock.d === d ? workClock : null; }
 
   function workPhases(exId, secs) {
+    if (TRAINING.toFailure(exId)) return [{ k: "hold", s: secs, side: 0 }];
     return TRAINING.eachSide(exId)
       ? [{ k: "work", s: secs, side: 1 }, { k: "switch", s: CLOCK_SWITCH, side: 0 }, { k: "work", s: secs, side: 2 }]
       : [{ k: "work", s: secs, side: 0 }];
@@ -4217,7 +4231,13 @@
     var c = workClock, p = c.phases[c.at];
     c.end = from + p.s * 1000;
     c.beeped = 0;
-    if (p.k === "work") {
+    if (p.k === "hold") {
+      c.begin = from;
+      c.end = Infinity;
+      c.passed = false;
+      beep(1175, 0.7); vibrate([200]);
+      clockSay("Go", exName(c.d.exId) + ": hold as long as you can. The one to pass: " + p.s + " seconds.");
+    } else if (p.k === "work") {
       beep(1175, 0.7); vibrate([200]);
       clockSay("Go", p.side === 2 ? "The other side, " + p.s + " seconds." : exName(c.d.exId) + ", " + p.s + " seconds" + (p.side ? " a side." : "."));
     } else if (p.k === "switch") {
@@ -4251,11 +4271,25 @@
     var c = workClock, now = nowMs();
     if (!c) return;
     if (c.paused !== null) { c.last = now; return; }
+    var p = c.phases[c.at];
     // Nothing ran for a while (the phone locked, the app was frozen in the
     // background): that time didn't count, the clock picks up where it was.
-    if (now - c.last > CLOCK_GAP) c.end += now - c.last;
+    if (now - c.last > CLOCK_GAP) {
+      if (p.k === "hold") c.begin += now - c.last; else c.end += now - c.last;
+    }
     c.last = now;
-    var p = c.phases[c.at], left = c.end - now;
+    if (p.k === "hold") {
+      var held = clockHeld(c);
+      if (held >= HOLD_MAX) { holdDone(now); return; }
+      if (!c.passed && held >= p.s) {
+        c.passed = true;
+        beep(1175, 0.3); vibrate([120, 60, 120]);
+        clockSay("Past your target", p.s + " seconds: keep going.");
+      }
+      paintClock();
+      return;
+    }
+    var left = c.end - now;
     if (left <= 0) { phaseDone(now); return; }
     // The last three seconds before work are counted in.
     var whole = Math.ceil(left / 1000);
@@ -4276,14 +4310,25 @@
     setDone(now);
   }
 
-  // The countdown ran out: the set is ticked and saved with its seconds.
-  // Then the rest. Hands-free with something left to do: the clock's own,
-  // and what follows it. Else the usual rest pill, and the sheet again.
-  function setDone(now) {
+  // Done, on a hold: the set is the seconds held. A tap in its first second
+  // is taken for one meant for the button before it (Pause), and ignored.
+  function holdDone(now) {
+    var c = workClock;
+    if (!c || c.phases[c.at].k !== "hold") return;
+    var secs = Math.min(HOLD_MAX, Math.floor(clockHeld(c)));
+    if (secs < 1) return;
+    setDone(now, secs);
+  }
+
+  // The countdown ran out, or a hold is done (secs: the seconds held): the
+  // set is ticked and saved with its seconds. Then the rest. Hands-free with
+  // something left to do: the clock's own, and what follows it. Else the
+  // usual rest pill, and the sheet again.
+  function setDone(now, secs) {
     var c = workClock, d = c.d, ex = TRAINING.exercise(d.exId), r = d.rows[c.row];
     if (gymDraft !== d || !r || r.done) { endClock(); renderSheet(); return; }
     var from = phaseStart(c, now), rest = restFor(ex);
-    r.reps = String(c.secs);
+    r.reps = String(secs != null ? secs : c.secs);
     var res = tickSave(d, ex, r);
     var next = res.ok && c.chain ? TRAINING.circuitNext(gym(), d.exId, nowMs()) : null;
     beep(); vibrate([120, 60, 120]);
@@ -4341,14 +4386,15 @@
   function pauseClock() {
     var c = workClock;
     if (!c || c.paused !== null) return;
-    c.paused = Math.max(0, c.end - nowMs());
+    c.paused = c.phases[c.at].k === "hold" ? Math.max(0, nowMs() - c.begin) : Math.max(0, c.end - nowMs());
     paintClock();
     updateWakeLock();
   }
   function resumeClock() {
     var c = workClock;
     if (!c || c.paused === null) return;
-    c.end = nowMs() + c.paused;
+    if (c.phases[c.at].k === "hold") c.begin = nowMs() - c.paused;
+    else c.end = nowMs() + c.paused;
     c.last = nowMs();
     c.paused = null;
     ensureAudio();
@@ -4364,8 +4410,13 @@
     workClock = null;
     updateWakeLock();
   }
-  // How long the clock's phase still has, in seconds.
-  function clockLeft(c) { return Math.max(0, c.paused !== null ? c.paused : c.end - nowMs()) / 1000; }
+  // How long the clock's phase still has, in seconds (a hold: no end).
+  function clockLeft(c) {
+    if (c.phases[c.at].k === "hold") return Infinity;
+    return Math.max(0, c.paused !== null ? c.paused : c.end - nowMs()) / 1000;
+  }
+  // How long a hold has gone on, in seconds.
+  function clockHeld(c) { return Math.max(0, c.paused !== null ? c.paused : nowMs() - c.begin) / 1000; }
 
   // Stop: back to the sheet. A set under way isn't logged, but the seconds
   // it got to go into its box, one tick away from the log. A rest goes on
@@ -4374,8 +4425,8 @@
     var c = workClock;
     if (!c) return;
     var d = c.d, p = c.phases[c.at], r = d.rows[c.row], left = clockLeft(c), msg = "";
-    if (p.k === "work" && r && !r.done) {
-      var did = Math.min(p.s, Math.floor(p.s - left));
+    if ((p.k === "work" || p.k === "hold") && r && !r.done) {
+      var did = p.k === "hold" ? Math.min(HOLD_MAX, Math.floor(clockHeld(c))) : Math.min(p.s, Math.floor(p.s - left));
       if (did >= 1) { r.reps = String(did); msg = "Stopped at " + did + " sec. Tick ✓ to log it."; }
     }
     endClock();
@@ -4415,30 +4466,40 @@
     var c = workClock, box = $("#wc");
     if (!c || !box) return;
     var put = function (id, text) { var el = $(id); if (el && el.textContent !== text) el.textContent = text; };
-    var p = c.phases[c.at], d = c.d, left = clockLeft(c), held = c.paused !== null;
-    var label = p.k === "ready" ? "Get ready" : (p.k === "switch" ? "Switch sides" : (p.k === "rest" ? "Rest" : (p.side ? "Side " + p.side + " of 2" : "Go")));
+    var p = c.phases[c.at], d = c.d, left = clockLeft(c), held = c.paused !== null, hold = p.k === "hold";
+    // A hold counts up: the seconds held, against the number to pass.
+    var secsHeld = hold ? clockHeld(c) : 0, past = hold && secsHeld >= p.s;
+    var label = p.k === "ready" ? "Get ready" : (p.k === "switch" ? "Switch sides" : (p.k === "rest" ? "Rest" :
+      (hold ? (past ? "Past your target" : "Hold") : (p.side ? "Side " + p.side + " of 2" : "Go"))));
     if (box.getAttribute("data-k") !== p.k) box.setAttribute("data-k", p.k);
     box.classList.toggle("paused", held);
+    box.classList.toggle("past", past);
     put("#wcPhase", (held ? "Paused · " : "") + label);
-    var whole = Math.ceil(left);
+    var whole = hold ? Math.floor(secsHeld) : Math.ceil(left);
     put("#wcTime", whole < 60 ? String(whole) : fmtTime(whole));
     var bar = $("#wcBar");
-    if (bar) bar.style.width = Math.max(0, Math.min(100, (1 - left / p.s) * 100)).toFixed(1) + "%";
+    if (bar) bar.style.width = Math.max(0, Math.min(100, (hold ? secsHeld / p.s : 1 - left / p.s) * 100)).toFixed(1) + "%";
     // "Set 2 of 3": warm-ups aside, and of as many as the circuit gives it
     // when a sheet reopened mid-way has fewer rows than that.
     var counted = function (r) { return !r.warm; };
     put("#wcSet", "Set " + d.rows.slice(0, c.row + 1).filter(counted).length + " of " + Math.max(d.rows.filter(counted).length, c.sets) +
-      (p.k === "rest" ? " saved ✓" : " · " + c.secs + " sec" + (TRAINING.eachSide(d.exId) ? " each side" : "")));
-    put("#wcNext", p.k === "rest" ? "Next: " + nextText(c) : (c.chain ? "Hands-free: the rest and what comes next start by themselves." : ""));
+      (p.k === "rest" ? " saved ✓" : (TRAINING.toFailure(d.exId) ? " · to pass: " + c.secs + " sec" : " · " + c.secs + " sec" + (TRAINING.eachSide(d.exId) ? " each side" : ""))));
+    put("#wcNext", p.k === "rest" ? "Next: " + nextText(c)
+      : (hold ? "Tap Done when you can't hold it any longer."
+        : (c.chain ? "Hands-free: the rest and what comes next start by themselves." : "")));
     var skip = $("#wcSkip");
     if (skip) skip.hidden = p.k !== "rest";
-    put("#wcPause", held ? "Resume" : "Pause");
+    // During a hold the big button is Done: the one to reach for, worn out.
+    put("#wcPause", held ? "Resume" : (hold ? "Done ✓" : "Pause"));
   }
 
   function wireClock(sheet) {
     $("#wcStop", sheet).addEventListener("click", stopClock);
     $("#wcPause", sheet).addEventListener("click", function () {
-      if (workClock && workClock.paused !== null) resumeClock(); else pauseClock();
+      if (!workClock) return;
+      if (workClock.paused !== null) resumeClock();
+      else if (workClock.phases[workClock.at].k === "hold") holdDone(nowMs());
+      else pauseClock();
     });
     $("#wcSkip", sheet).addEventListener("click", function () {
       var c = workClock;

@@ -2148,10 +2148,13 @@ p.lc-cap { margin: 6px 2px 0; font-size: 0.8rem; color: var(--muted); line-heigh
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
-.wc[data-k="work"] .wc-phase { color: var(--area); }
+.wc[data-k="work"] .wc-phase, .wc[data-k="hold"] .wc-phase { color: var(--area); }
 .wc-bar { height: 10px; max-width: 22rem; margin: 0 auto 18px; border-radius: 999px; background: var(--grid); overflow: hidden; }
 .wc-bar span { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--muted); }
-.wc[data-k="work"] .wc-bar span { background: var(--area); }
+.wc[data-k="work"] .wc-bar span, .wc[data-k="hold"] .wc-bar span { background: var(--area); }
+/* A hold past the number to pass: the bar is full and says so. */
+.wc.past .wc-phase { color: var(--good); }
+.wc.past .wc-bar span { background: var(--good); }
 .wc .wc-set { font-size: 1.02rem; font-weight: 700; color: var(--ink); }
 .wc .wc-next { min-height: 2.9em; margin: 6px auto 0; max-width: 24rem; font-size: 0.92rem; line-height: 1.45; color: var(--ink-2); }
 .wc[data-k="rest"] .wc-next { font-size: 1.02rem; font-weight: 650; color: var(--ink); }

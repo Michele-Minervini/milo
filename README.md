@@ -158,6 +158,12 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   It runs only while Milo is on screen, so the screen is kept on; if the app
   goes to the background the clock pauses and waits for Resume. A reload ends
   it (the sets it ticked are already saved).
+  **Hold till failure** counts up instead: after the 5 seconds the clock runs
+  from 0 with no end, beeps (and, with the notification on, buzzes) when you
+  pass the number in the box, and the big button is **Done ✓** — tap it when
+  you can't hold any longer and the seconds you held are logged, then the rest
+  and hands-free go on as for any set. Which exercises count up is a list in
+  data.js (`GYM_TO_FAILURE`).
 - **Set times.** A timed exercise whose range is one number is done for
   exactly that long, and Milo never raises it by itself: the six of the abs
   circuit come that way (40 seconds, 20 a side). Its sheet has **Seconds per
