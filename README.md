@@ -164,6 +164,10 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   you can't hold any longer and the seconds you held are logged, then the rest
   and hands-free go on as for any set. Which exercises count up is a list in
   data.js (`GYM_TO_FAILURE`).
+- **Body weight in pull-ups, chin-ups and dips.** Once you have weighed in,
+  their chart is the estimated 1-rep max with your body in — your weight that
+  day plus what you added — so sets with and without added weight sit on one
+  line, and the back and chest strength lines compare them the same way.
 - **Set times.** A timed exercise whose range is one number is done for
   exactly that long, and Milo never raises it by itself: the six of the abs
   circuit come that way (40 seconds, 20 a side). Its sheet has **Seconds per

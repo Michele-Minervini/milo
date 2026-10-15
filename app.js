@@ -24,7 +24,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v31";
+  var BUILD = "milo-v32";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -1252,7 +1252,7 @@
                       once. A device with nothing on it at its first launch
                       is given NEWS straight away and never sees it.
        milo.come      "done" once "Coming from another device?" is answered. */
-  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v31";
+  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v32";
   // Dismissed in this page view: holds even where the flag can't be stored.
   var newsSeen = false;
   function flag(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
@@ -1490,7 +1490,7 @@
   function whatsNewLineHTML() {
     return '<div class="today-card wnline">' +
       '<button class="wn-open" id="whatsNewBtn" type="button">' + ico("&#10024;") +
-      '<span class="wn-text"><b>Hold till failure: a clock that counts up.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<span class="wn-text"><b>Pull-ups and dips: your body weight counts.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
       '<button class="nc-x" id="whatsNewX" type="button" aria-label="Hide what&#8217;s new">&#10005;</button></div>';
   }
 
@@ -1902,7 +1902,7 @@
   // The strength line of a group: 100 before the first week shown, moved by
   // each week's average change of the exercises repeated (TRAINING.strength).
   function groupStrengthHTML(g, now) {
-    var all = TRAINING.strength(gym(), g, now), first = -1;
+    var all = TRAINING.strength(gym(), g, now, null, state.log), first = -1;
     all.forEach(function (w, i) { if (first === -1 && w.n > 0) first = i; });
     var weeks = first === -1 ? [] : all.slice(first);
     if (weeks.filter(function (w) { return w.n > 0; }).length < 2) {
@@ -1926,7 +1926,7 @@
       left: d0.getDate() + " " + MON_SHORT[d0.getMonth()], right: "this week", end: pctText(total),
       aria: "Strength for " + groupName(g) + " over the last " + weeks.length + " weeks, starting from 100. " + words
     }) + "</div>" +
-      '<p class="lc-cap">' + esc(words) + " The average of the exercises you repeated, each against its own last session: estimated 1-rep max for weights, reps for the rest. " +
+      '<p class="lc-cap">' + esc(words) + " The average of the exercises you repeated, each against its own last session: estimated 1-rep max for weights (pull-ups, chin-ups and dips with your body weight in, once you have weighed in), reps for the rest. " +
       "It starts at 100, and can dip in a week you go up in weight.</p>";
   }
 
@@ -3023,6 +3023,8 @@
   function whatsNewPaneHTML() {
     return sheetHead({ title: ico("&#10024;") + "What&#8217;s new in Milo", sub: "Once, after this update" }) +
       '<div class="sheet-body volinfo whatsnew">' +
+      "<h4>Pull-ups, chin-ups and dips count your body weight</h4><p>Once you have weighed in, their chart (tap &#9432; in the exercise) is your <b>estimated 1-rep max with your body in</b>: " +
+      "your weight that day plus what you added, so a set with 5 kg on and one with none sit on one line. The best one is under <b>Your numbers</b>, and the strength line of back and chest uses it too.</p>" +
       "<h4>Hold till failure counts up</h4><p>Its <b>&#9654;</b> now starts a clock that counts up from 0. It beeps when you pass the number in the box; " +
       "tap <b>Done &#10003;</b> when you can&#8217;t hold any longer, and the seconds you held are logged and the rest starts. Hands-free carries on to the next set as before.</p>" +
       "<h4>Gym or Bodyweight</h4><p>Today&#8217;s plan has a switch. <b>Bodyweight</b> keeps your split and the day you are on, and lists what you can do without a gym: " +
@@ -4517,15 +4519,19 @@
   // The chart of an exercise's latest sessions, with its words. "" when there
   // is nothing to chart yet. What is plotted depends on the exercise
   // (TRAINING.trend): an estimated 1-rep max, a top weight, reps or seconds.
-  var CHART_NAME = { e1rm: "Estimated 1-rep max", assist: "Help from the machine", reps: "Most reps in a set", secs: "Longest set" };
+  var CHART_NAME = { e1rm: "Estimated 1-rep max", body: "Estimated 1-rep max, body weight in", assist: "Help from the machine", reps: "Most reps in a set", secs: "Longest set" };
   function exerciseChartHTML(ex) {
-    var tr = TRAINING.trend(gym(), ex.id), pts = tr.points, kind = tr.kind;
+    var tr = TRAINING.trend(gym(), ex.id, null, state.log), pts = tr.points, kind = tr.kind;
     if (!pts.length) return "";
+    // Pull-ups, chin-ups, dips before the first weigh-in: what one would change.
+    var weighFirst = TRAINING.bodyShare(ex.id) && kind !== "body"
+      ? '<p class="hint">Log a weigh-in and this becomes your estimated 1-rep max with your body weight in, so sets with and without added weight sit on one line.</p>' : "";
     var title = kind === "kg" ? (ex.load === "added" ? "Top added weight" : "Top weight") : CHART_NAME[kind];
-    if (pts.length < 2) return "<h4>" + title + '</h4><p class="empty-line">The chart starts with your second session.</p>';
+    if (pts.length < 2) return "<h4>" + title + '</h4><p class="empty-line">The chart starts with your second session.</p>' + weighFirst;
     var weight = kind !== "reps" && kind !== "secs";
     // A value as it is shown: the estimate to the nearest ½ kg, like the table.
-    var num = function (v) { return kind === "e1rm" ? Math.round(v * 2) / 2 : v; };
+    var est = kind === "e1rm" || kind === "body";
+    var num = function (v) { return est ? Math.round(v * 2) / 2 : v; };
     var amount = function (v) { return weight ? fmtW(v) + " kg" : (kind === "secs" ? v + " sec" : v + (v === 1 ? " rep" : " reps")); };
     // A record day's hover text names the record's own set: the plotted
     // value can be another set of that day (a heavier one under the floor).
@@ -4546,7 +4552,8 @@
       if (gap) anyGap = true;
       return {
         x: i / (pts.length - 1), v: p.value, big: p.record, gap: gap,
-        tip: shortDay(p.ts) + ": " + amount(num(p.value)) + (kind === "e1rm" ? " (" + oneSet(ex, p.kg, p.reps) + ")" : "") + recTip(p)
+        tip: shortDay(p.ts) + ": " + amount(num(p.value)) + (kind === "e1rm" ? " (" + oneSet(ex, p.kg, p.reps) + ")" : "") +
+          (kind === "body" ? " (" + bodySetText(ex, p) + ")" : "") + recTip(p)
       };
     });
     var diff = num(b.value) - num(a.value), by = amount(Math.abs(diff));
@@ -4556,6 +4563,9 @@
     var explain = kind === "e1rm"
       ? "Your estimated 1-rep max is the most you could probably lift once, worked out from the best set of each day. It often dips on the day you go up in weight, because you start again at fewer reps. A yardstick, not a weight to try." +
         (ex.perHand ? " Per hand, like the weights you log." : "")
+      : kind === "body"
+        ? "The most you could probably lift once, your body included: your weight that day (from your latest weigh-in) plus what you added, worked out from the best set of each day. " +
+          "So a set with weight added and one without sit on one line. It moves with your body weight too. A yardstick, not a weight to try."
       : (kind === "kg" ? (ex.load === "added" ? "The most weight you added each day (0 is your bodyweight alone)." : "The heaviest counted set of each day.")
         : (kind === "assist" ? "The least help you used each day. Lower is harder."
           : (kind === "secs" ? "Your longest set each day, in seconds." : "Your most reps in one set each day.")));
@@ -4570,7 +4580,12 @@
       '<p class="lc-cap">' + esc(words) + " " + esc(explain) + "</p>" +
       (recN || anyGap ? '<div class="legend lc-legend" aria-hidden="true">' +
         (recN ? '<span><i class="lg-rec"></i>' + (kind === "e1rm" ? "New top weight" : "Record day") + "</span>" : "") +
-        (anyGap ? '<span><i class="lg-gap"></i>More than 6 weeks off</span>' : "") + "</div>" : "");
+        (anyGap ? '<span><i class="lg-gap"></i>More than 6 weeks off</span>' : "") + "</div>" : "") + weighFirst;
+  }
+  // "76 kg body + 6 × 10 kg added": what an estimate with body weight in
+  // was worked out from.
+  function bodySetText(ex, p) {
+    return fmtKg(p.body) + " kg body" + (p.kg > 0 ? " + " + oneSet(ex, p.kg, p.reps) : ", " + p.reps + (p.reps === 1 ? " rep" : " reps"));
   }
 
   // What a record is for this exercise, in one or two plain sentences.
@@ -4600,6 +4615,8 @@
     if (st.r) marks += row(ex.timed ? "Longest set" : (plain ? "Most reps" : (ex.load === "assist" ? "Most reps, no help" : "Most reps, no weight on")),
       (ex.timed ? st.r.reps + " sec" : String(st.r.reps)) + " · " + dayYear(st.r.ts));
     if (!marks && best) marks = row("Best set", best.kg ? best.reps + (ex.timed ? " sec" : "") + " × " + fmtW(best.kg) + (ex.load === "assist" ? " kg assist" : (ex.load === "added" ? " kg added" : " kg")) : best.reps + " " + unit);
+    var bb = TRAINING.bodyBest(gym(), exId, state.log);
+    if (bb) marks += row("Best estimated 1-rep max, body in", fmtW(Math.round(bb.value * 2) / 2) + " kg (" + bodySetText(ex, bb) + ") · " + dayYear(bb.ts));
     var numbers = sessions.length
       ? '<div class="stdtable">' + row("Sessions", String(x ? x.days.length : 0)) + marks +
         (best && best.e1rm && ex.hi <= TRAINING.E1RM_MAX_HI

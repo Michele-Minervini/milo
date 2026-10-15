@@ -576,4 +576,53 @@ section("weigh-ins and the merge: two devices, the same day");
   check("a weigh-in is never training: no workout, no hard set", !M.isTraining(wa) && J(T.groupWeights(wa)) === "{}" && T.totalWorkouts([wa]) === 0);
 }
 
+section("pull-ups, chin-ups and dips: the estimate with body weight in");
+{
+  const e1 = (kg, r) => kg * (1 + r / 30);
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  eq("which exercises count body weight: pull-up, chin-up, dips, all of it", ["pullup_std", "chinup_w", "dips", "bench_dips", "back_ext", "knee_raise_w", "bench_db", "plank", "nope", null].map(id => T.bodyShare(id)),
+    [1, 1, 1, 0, 0, 0, 0, 0, 0, 0]);
+  const pulls = [G(S(1), "pullup_std", [8, 7, 6], 0), G(S(8), "pullup_std", [6, 5], 5), G(S(15), "pullup_std", [10, 9], 0)];
+  const tNone = T.trend(pulls, "pullup_std", null, pulls);
+  eq("no weigh-in: the chart is as before (top added weight)", tNone.kind, "kg");
+  eq("…and with no log for weigh-ins at all", [T.trend(pulls, "pullup_std").kind, T.trend(pulls, "pullup_std", null, null).kind, T.trend(pulls, "pullup_std", null, "junk").kind], ["kg", "kg", "kg"]);
+  const log = pulls.concat([W(S(3), 76), W(S(14), 74)]);
+  const tr = T.trend(log, "pullup_std", null, log);
+  eq("with a weigh-in: body weight + added, the best set of each day", [tr.kind, tr.points.map(p => [p.day.slice(5), p.body, p.kg, p.reps])],
+    ["body", [["09-01", 76, 0, 8], ["09-08", 76, 5, 6], ["09-15", 74, 0, 10]]]);
+  check("…worked out as (body + added) × (1 + reps / 30)", near(tr.points[0].value, e1(76, 8)) && near(tr.points[1].value, e1(81, 6)) && near(tr.points[2].value, e1(74, 10)), J(tr.points.map(p => p.value)));
+  eq("a day before the first weigh-in takes the first; later days the latest up to that day", tr.points.map(p => p.body), [76, 76, 74]);
+  eq("a weigh-in later the same day counts for that day", T.trend(log.concat([W(S(15, 20), 75)]), "pullup_std", null, log.concat([W(S(15, 20), 75)])).points[2].body, 75);
+  eq("the best set of the day, not the heaviest: 5 kg × 6 beats 7.5 kg × 2", (() => { const l = [G(S(8), "pullup_std", [6, 2], [5, 7.5]), W(S(3), 76)]; const p = T.trend(l, "pullup_std", null, l).points[0]; return [p.kg, p.reps]; })(), [5, 6]);
+  eq("warm-ups stay out", (() => { const l = [G(S(8), "pullup_std", [12, 6], [0, 5], { warm: [1, 0] }), W(S(3), 76)]; const p = T.trend(l, "pullup_std", null, l).points[0]; return [p.kg, p.reps]; })(), [5, 6]);
+  eq("chin-ups and dips too", ["chinup_w", "dips"].map(id => { const l = [G(S(8), id, [8], 10), W(S(3), 80)]; const t = T.trend(l, id, null, l); return [t.kind, Math.round(t.points[0].value * 100) / 100]; }),
+    [["body", 114], ["body", 114]]);
+  eq("bench dips and back extensions keep their chart", ["bench_dips", "back_ext"].map(id => { const l = [G(S(8), id, [12], 10), W(S(3), 80)]; return T.trend(l, id, null, l).kind; }), ["kg", "kg"]);
+  eq("any record marks the day", (() => { const l = [G(S(1), "pullup_std", [8], 0), G(S(8), "pullup_std", [6], 5), G(S(15), "pullup_std", [12], 0), W(S(3), 76)]; return T.trend(l, "pullup_std", null, l).points.map(p => p.record); })(), [false, true, true]);
+
+  const bb = T.bodyBest(log, "pullup_std", log);
+  eq("the best day with body weight in", [bb.day.slice(5), bb.body, bb.kg, bb.reps], ["09-15", 74, 0, 10]);
+  check("…and its estimate", near(bb.value, e1(74, 10)), bb.value);
+  eq("none without a weigh-in, for another exercise, or never logged", [T.bodyBest(pulls, "pullup_std", pulls), T.bodyBest(log, "bench_db", log), T.bodyBest([W(S(3), 76)], "pullup_std", [W(S(3), 76)]), T.bodyBest(log, "nope", log)], [null, null, null, null]);
+  check("with or without the index", J(T.bodyBest(T.gymIndex(log), "pullup_std", log)) === J(bb) && J(T.trend(T.gymIndex(log), "pullup_std", null, log)) === J(tr));
+  check("the same in any order", J(T.trend(shuffled(log), "pullup_std", null, shuffled(log, 3))) === J(tr));
+
+  // The strength line: sessions at different added weights compare once body weight is in.
+  const NOW2 = S(30, 20);
+  const wk = [G(S(14), "pullup_std", [8, 8], 0), G(S(21), "pullup_std", [6, 6], 5), G(S(28), "pullup_std", [8, 7], 5)];
+  const sNo = T.strength(wk, "back", NOW2, 3, wk), sYes = T.strength(wk, "back", NOW2, 3, wk.concat([W(S(10), 76)]));
+  eq("without a weigh-in: 0 kg then 5 kg can't be compared, 5 kg then 5 kg can", sNo.map(w => w.n), [0, 0, 1]);
+  eq("with one, every repeat compares", sYes.map(w => w.n), [0, 1, 1]);
+  check("…by the estimate with body weight in", near(sYes[1].change, e1(81, 6) / e1(76, 8) - 1) && near(sYes[2].change, e1(81, 8) / e1(81, 6) - 1), J(sYes.map(w => w.change)));
+  eq("other groups are left as they were", J(T.strength(log, "chest", NOW2, 3, log)) === J(T.strength(log, "chest", NOW2, 3)), true);
+
+  const junk = [null, 7, "x", {}, { kind: "body" }, { kind: "body", ts: S(2), kg: "x" }, { kind: "body", ts: S(2), kg: 5 }, { kind: "body", ts: 1e300, kg: 70 }, { kind: "gym", exId: "pullup_std", ts: S(2), sets: "8" }];
+  const threw = [];
+  [[], null, "log", junk, log.concat(junk)].forEach((l, i) => ["pullup_std", "dips", "bench_db", "nope", null, 7].forEach(id => {
+    try { T.trend(l, id, null, l); T.bodyBest(l, id, l); T.strength(l, "back", NOW2, 4, l); T.bodyShare(id); } catch (e) { threw.push(i + " " + String(id) + ": " + e.message); }
+  }));
+  check("nothing throws, for odd logs and exercises", !threw.length, threw.slice(0, 3).join("\n       "));
+  eq("junk weigh-ins are no weigh-ins", T.trend(pulls.concat(junk), "pullup_std", null, pulls.concat(junk)).kind, "kg");
+}
+
 h.done(__filename);

@@ -8,7 +8,7 @@
    ============================================================ */
 
 /* Build stamp: app.js refuses to run on files from two different releases. */
-const DATA_BUILD = "milo-v31";
+const DATA_BUILD = "milo-v32";
 
 const AREAS = [
   {
@@ -1434,6 +1434,15 @@ const GYM_SIDES = ["star_crunch", "plank_knee_elbow"];
    to pass. None is done a side at a time, has a set time (lo = hi) or is in
    a circuit (tests/data-test.js). */
 const GYM_TO_FAILURE = ["hold_failure"];
+
+/* Exercises that lift your body, with weight added on top (load "added"):
+   the share of body weight one rep lifts. Their estimated 1-rep max then
+   counts body weight + the added kg, from your weigh-ins (training.js,
+   trend, strength, bodyBest), so a pull-up with 5 kg and one with none sit
+   on one line. Pull-ups, chin-ups and dips lift nearly all of it, counted
+   as all, as is usual for them. Every id is an "added" exercise of the
+   catalogue, every share above 0 and at most 1 (tests/data-test.js). */
+const GYM_BODY_SHARE = { pullup_std: 1, chinup_w: 1, dips: 1 };
 
 /* ---------- Weekly splits: the plan (P6) ----------
 

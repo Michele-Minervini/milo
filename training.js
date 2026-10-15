@@ -35,7 +35,7 @@
 
    Reads the tables in data.js (AREAS, GROUP_INFO, AREA_GROUPS,
    VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED, SPLITS,
-   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES, GYM_TO_FAILURE, BODYWEIGHT_DEFAULTS,
+   SPLIT_SIDE, GROUP_DEFAULTS, GYM_CIRCUITS, GYM_SIDES, GYM_TO_FAILURE, GYM_BODY_SHARE, BODYWEIGHT_DEFAULTS,
    SKILL_SIDE) and the
    calendar-day helpers and sanitizeExercise in model.js, so it
    loads after both and before app.js.
@@ -58,7 +58,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v31";
+  var BUILD = "milo-v32";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -85,6 +85,7 @@ var TRAINING = (function () {
   var SKILL_SIDES = SKILL_SIDE;
   var SIDED = GYM_SIDES;
   var TO_FAILURE = GYM_TO_FAILURE;
+  var BODY_SHARE = GYM_BODY_SHARE;
 
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
@@ -1688,7 +1689,9 @@ var TRAINING = (function () {
         day: cur.day, ts: cur.ts, n: sets.length,
         top: { kg: top.kg, reps: top.reps, id: top.id, i: top.i },
         e1: e1 ? { kg: e1.kg, reps: e1.reps, value: e1.sc / 30 } : null,
-        rec: out, w: w, r: r, at: at, load: load
+        rec: out, w: w, r: r, at: at, load: load,
+        // Added weight: every counted set, for an estimate with body weight in.
+        all: added ? sets.map(function (s) { return [s.kg, s.reps]; }) : null
       });
     };
     list.forEach(function (x) {
@@ -1753,6 +1756,65 @@ var TRAINING = (function () {
     return { w: w, r: r, show: (w && w.kg > 0) ? w : (r || w) };
   }
 
+  /* ---------- Body weight in the lift: pull-ups, chin-ups, dips ---------- */
+
+  // The share of body weight one rep of an exercise lifts (data.js,
+  // GYM_BODY_SHARE), for an added-weight exercise; 0 for any other.
+  function bodyShare(exId) {
+    var ex = exRec(exId);
+    if (!ex || ex.load !== "added" || ex.timed || !own(BODY_SHARE, exId)) return 0;
+    var v = Number(BODY_SHARE[exId]);
+    return v > 0 && v <= 1 ? v : 0;
+  }
+
+  // The weigh-ins of a log, oldest first: [{ ts, kg }] (20–300 kg).
+  function weighSeries(log) {
+    var out = [];
+    (Array.isArray(log) ? log : []).forEach(function (e) {
+      if (!e || typeof e !== "object" || e.kind !== "body") return;
+      var t = timeOf(e), kg = Number(e.kg);
+      if (t > 0 && kg >= WEIGH_MIN && kg <= WEIGH_MAX) out.push({ ts: t, kg: kg });
+    });
+    out.sort(function (a, b) { return a.ts - b.ts; });
+    return out;
+  }
+
+  // Your body weight on a day: the latest weigh-in up to the end of that
+  // day, or — for a day before the first — the first one. null with none.
+  function bodyOn(series, ts) {
+    if (!series.length) return null;
+    var end = nextDay(ts), found = series[0];
+    for (var i = 0; i < series.length && series[i].ts < end; i++) found = series[i];
+    return found.kg;
+  }
+
+  // A day of an added-weight exercise as an estimated 1-rep max with body
+  // weight in: the best counted set's (share × body + added kg) × (1 +
+  // reps / 30). { value, body, kg, reps }, or null.
+  function bodyE1(exId, d, series) {
+    var share = bodyShare(exId), body = share > 0 && d.all ? bodyOn(series, d.ts) : null;
+    if (body === null) return null;
+    var best = null;
+    d.all.forEach(function (s) {
+      var v = e1rm(share * body + s[0], s[1]);
+      if (v > 0 && (!best || v > best.value)) best = { value: v, body: body, kg: s[0], reps: s[1] };
+    });
+    return best;
+  }
+
+  // The best day of an added-weight exercise counted with body weight:
+  // { value, body, kg, reps, ts, day }, or null (no weigh-in, none of those
+  // exercises, nothing logged). x: a log or its index; log: for weigh-ins.
+  function bodyBest(x, exId, log) {
+    var rec = exIndex(x, exId), series = weighSeries(log), out = null;
+    if (!rec || !bodyShare(exId) || !series.length) return null;
+    rec.days.forEach(function (d) {
+      var b = bodyE1(exId, d, series);
+      if (b && (!out || b.value > out.value)) out = { value: b.value, body: b.body, kg: b.kg, reps: b.reps, ts: d.ts, day: d.day };
+    });
+    return out;
+  }
+
   // An exercise's chart: its last `max` session days (TREND_SESSIONS unless
   // given), oldest first —
   //   { kind, points: [{ day, ts, value, kg, reps, record }] }
@@ -1765,6 +1827,11 @@ var TRAINING = (function () {
   //          "kg"      external weight with a higher range, and added
   //                    weight: the day's top weight (0 = bodyweight alone)
   //          "assist"  an assisted machine: the least help of the day
+  //          "body"    pull-ups, chin-ups, dips (bodyShare) when the log
+  //                    (`log`) has a weigh-in: the day's best estimated
+  //                    1-rep max with body weight in (bodyE1), whatever
+  //                    the weight added; points also carry `body`, and
+  //                    any record of the day marks it
   //   value  what is plotted; kg and reps are the set it comes from
   //   record that day has a record of the chart's kind (a weight record on
   //          the weight charts, a reps record on the other two; any record
@@ -1772,7 +1839,7 @@ var TRAINING = (function () {
   // Days without a weighted set are left out of "e1rm" (and of "kg" for
   // an external weight). An exercise nobody knows, or never logged:
   // { kind: null, points: [] }.
-  function trend(x, exId, max) {
+  function trend(x, exId, max, log) {
     var rec = exIndex(x, exId), ex = exRec(exId), out = { kind: null, points: [] };
     if (!rec || !ex) return out;
     var n = (max === null || max === undefined) ? TREND_SESSIONS : Math.round(Number(max));
@@ -1781,12 +1848,20 @@ var TRAINING = (function () {
     var weighted = mode !== "reps" && days.some(function (d) { return d.top.kg > 0; });
     var kind = ex.timed ? "secs" : (!weighted ? "reps"
       : (mode === "assist" ? "assist" : (ex.load === "ext" && ex.hi <= E1RM_MAX_HI ? "e1rm" : "kg")));
+    // Pull-ups, chin-ups, dips with a weigh-in to go by: body weight + added.
+    var series = bodyShare(exId) ? weighSeries(log) : [];
+    if (series.length) kind = "body";
     var byWeight = kind === "e1rm" || kind === "kg" || kind === "assist";
     days.forEach(function (d) {
       // (The first day with no help at all is a record "by reps": on the
       // help chart it is the biggest step there is.)
       var p = { day: d.day, ts: d.ts, value: 0, kg: d.top.kg, reps: d.top.reps, record: !!d.rec && (kind === "assist" || (d.rec.by === "kg") === byWeight) };
-      if (kind === "e1rm") {
+      if (kind === "body") {
+        var b = bodyE1(exId, d, series);
+        if (!b) return;
+        p.value = b.value; p.kg = b.kg; p.reps = b.reps; p.body = b.body;
+        p.record = !!d.rec;
+      } else if (kind === "e1rm") {
         if (!d.e1) return;
         p.value = d.e1.value; p.kg = d.e1.kg; p.reps = d.e1.reps;
       } else if (kind === "kg" || kind === "assist") {
@@ -1951,8 +2026,12 @@ var TRAINING = (function () {
   // exercise: the best estimated 1-rep max for an external weight, the most
   // reps (seconds) where weight doesn't count, and for added weight or an
   // assisted machine the reps at the top weight — comparable only with a
-  // session at that same weight (`k` says what the number is).
-  function dayValue(ex, d) {
+  // session at that same weight (`k` says what the number is). Pull-ups,
+  // chin-ups and dips with weigh-ins (series): the estimate with body
+  // weight in, which any two sessions can be set against.
+  function dayValue(ex, d, series) {
+    var b = series && series.length ? bodyE1(ex.id, d, series) : null;
+    if (b) return { k: "b", v: b.value };
     if (weightMode(ex) === "reps") return { k: "r", v: d.top.reps };
     if (d.e1) return { k: "e", v: d.e1.value };
     return { k: "w" + d.top.kg, v: d.top.reps };
@@ -1973,13 +2052,13 @@ var TRAINING = (function () {
   // An average of percentages, not of kilos: that is what lets a squat, a
   // leg press and a set of push-ups share one line. [] for a group that
   // isn't one or a time that isn't one.
-  function strength(x, group, now, weeks) {
+  function strength(x, group, now, weeks, log) {
     var out = [];
     if (!isGroup(group) || !validTime(now)) return out;
     var n = (weeks === null || weeks === undefined) ? STRENGTH_WEEKS : Math.round(Number(weeks));
     if (!(n >= 1)) n = STRENGTH_WEEKS;
     n = Math.min(MAX_HISTORY_WEEKS, n);
-    var idx = asIndex(x), t = Number(now), cur = weekStart(t), end = nextDay(t), level = 100;
+    var idx = asIndex(x), t = Number(now), cur = weekStart(t), end = nextDay(t), level = 100, series = weighSeries(log);
     var ids = Object.keys(idx.byEx).filter(function (id) { var ex = exRec(id); return !!ex && ex.p === group; });
     for (var i = n - 1; i >= 0; i--) {
       var from = addWeeks(cur, -i), to = Math.min(addWeeks(from, 1), end), sum = 0, k = 0;
@@ -1990,7 +2069,7 @@ var TRAINING = (function () {
           if (days[j].ts >= from) { if (!a) a = days[j]; } else b = days[j];
         }
         if (!a || !b || dayDelta(b.ts, a.ts) > RETURN_DAYS) return;
-        var va = dayValue(ex, a), vb = dayValue(ex, b);
+        var va = dayValue(ex, a, series), vb = dayValue(ex, b, series);
         if (va.k !== vb.k || !(va.v > 0) || !(vb.v > 0)) return;
         sum += Math.max(1 / STRENGTH_SWING, Math.min(STRENGTH_SWING, va.v / vb.v));
         k++;
@@ -2650,6 +2729,8 @@ var TRAINING = (function () {
     splitState: splitState,
     eachSide: eachSide,
     toFailure: toFailure,
+    bodyShare: bodyShare,
+    bodyBest: bodyBest,
     fixedTime: function (exId) { return fixedTime(exRec(exId)); },
     circuitOf: circuitOf,
     circuitNext: circuitNext,
