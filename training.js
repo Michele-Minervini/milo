@@ -59,7 +59,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v33";
+  var BUILD = "milo-v34";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -2479,6 +2479,203 @@ var TRAINING = (function () {
     return null;
   }
 
+  /* ---------- The week in review ---------- */
+
+  // How many weeks the review's grid and strength lines look back, and how
+  // many weeks its "training days a week" bars show.
+  var REVIEW_WEEKS = 12;
+  var REVIEW_DAYS_WEEKS = 26;
+  // A group last trained longer ago than this, at the end of the week, gets a note.
+  var REVIEW_GAP_DAYS = 10;
+  // An exercise whose last this-many sessions each brought nothing up on the
+  // one before is stalled (needs one more session to compare the first).
+  var STALL_SESSIONS = 3;
+  // A note to weigh in after this many days without one (once there is one).
+  var REVIEW_WEIGH_DAYS = 14;
+  // The four parts of a day a session can start in: from 5, 12, 17 and 22 h.
+  var DAY_PARTS = [5, 12, 17, 22];
+
+  // A time somebody chose afterwards — a session logged for an earlier day
+  // gets midday (app.js, quickTs) — says nothing about when it was done.
+  function chosenTime(t) {
+    var d = new Date(t);
+    return d.getHours() === 12 && d.getMinutes() === 0 && d.getSeconds() === 0 && d.getMilliseconds() === 0;
+  }
+  function dayPart(t) {
+    var h = new Date(t).getHours();
+    for (var i = DAY_PARTS.length - 1; i >= 0; i--) if (h >= DAY_PARTS[i]) return i;
+    return DAY_PARTS.length - 1;          // after midnight, before 5: night
+  }
+
+  // The week in review: the week containing weekTs, Monday to Sunday, as it
+  // stood at its end — or as it stands now, while it is under way. Every
+  // number the review shows, as data (the words are app.js's):
+  //   start, end     its Monday 00:00 and the next Monday 00:00 (ms)
+  //   current        it is still under way: what it holds is up to today
+  //   workouts       training days in it; workoutsAvg: the average of the
+  //                  4 weeks before it, counting only weeks since the first
+  //                  training day (null when there are none)
+  //   sets, setsAvg  hard sets of all six groups together, the same way
+  //   groups         weekSummary's rows, each with prev (last week's sets)
+  //                  and days (days of the week with a hard set for it)
+  //   history        REVIEW_WEEKS weeks ending with it: [{ start, sets, zones }]
+  //   perWeek        REVIEW_DAYS_WEEKS weeks ending with it: [{ start, n }]
+  //   streak         weekStreak at its end
+  //   when           sessions of the last REVIEW_WEEKS weeks by when they
+  //                  began: [7 weekdays, Monday first][4 parts of the day]
+  //                  (a day's earliest entry with a real time; entries
+  //                  logged afterwards for an earlier day don't count)
+  //   records        the records set in it, oldest first
+  //   progress       progress() for it
+  //   strength       { group: strength() over REVIEW_WEEKS weeks }
+  //   lifts          up to 3 main gym exercises of the last 8 weeks, the
+  //                  most trained first: [{ exId, group, days }]
+  //   body           { kg, ts, change } the latest weigh-in up to its end;
+  //                  change from the latest one before it began, or null
+  //                  (no weigh-in in the week, or none before); null if none
+  //   notes          what to look at next, at most 4, in this order:
+  //                    { kind: "low", group, sets, lo, hi, twice }   under the target
+  //                      (twice: last week too); the two furthest under
+  //                    { kind: "stall", exId, kg, reps }   STALL_SESSIONS
+  //                      sessions without anything up; at most 2, latest first
+  //                    { kind: "high", group, sets, hi }   past the top
+  //                    { kind: "gap", group, days }   not trained for longer
+  //                      than REVIEW_GAP_DAYS days; the longest
+  //                    { kind: "weigh", days }   no weigh-in for REVIEW_WEIGH_DAYS
+  //                    { kind: "empty" }   a past week with no training
+  //                    { kind: "good" }    nothing else, and every group on target
+  //                  A week under way gets no "low", "high" or "good": it isn't
+  //                  over; nor does a week with no training ("empty" says it).
+  // null for a time that isn't one. x: the log's index (gymIndex), if at hand.
+  function weekReport(log, weekTs, vol, now, x) {
+    if (!validTime(weekTs) || !validTime(now)) return null;
+    var start = weekStart(weekTs), end = addWeeks(start, 1), t = Number(now);
+    var current = t >= start && t < end, at = current ? t : end - 1, until = nextDay(at);
+    var idx = asIndex(x === undefined || x === null ? log : x);
+    var list = Array.isArray(log) ? log : [];
+
+    // Training days, once: every week's count comes from this.
+    var days = workoutDayMap(list, until), perWeekN = dict(), first = Infinity;
+    Object.keys(days).forEach(function (k) {
+      var w = weekStart(days[k]);
+      perWeekN[w] = (perWeekN[w] || 0) + 1;
+      if (days[k] < first) first = days[k];
+    });
+    var weekSets = function (w) { var v = weekVolume(list, w), n = 0; GROUPS.forEach(function (g) { n += v[g]; }); return quarter(n); };
+    var before = [];
+    for (var i = 1; i <= 4; i++) { var w = addWeeks(start, -i); if (addWeeks(w, 1) > first) before.push(w); }
+    var avg = function (f) {
+      if (!before.length) return null;
+      var n = 0;
+      before.forEach(function (w) { n += f(w); });
+      return Math.round(n / before.length * 10) / 10;
+    };
+
+    var tg = targets(vol), last = addWeeks(start, -1), prevSets = weekVolume(list, last);
+    var groups = weekSummary(list, at, vol).map(function (r) {
+      var n = 0;
+      for (var d = startOfDay(start); d.getTime() < until; d = addDays(d, 1)) {
+        if (dayDirect(list, d.getTime()).indexOf(r.group) !== -1) n++;
+      }
+      r.prev = prevSets[r.group];
+      r.days = n;
+      return r;
+    });
+    var total = 0;
+    groups.forEach(function (r) { total += r.sets; });
+
+    var history = weekHistory(list, at, REVIEW_WEEKS).map(function (h) {
+      var z = {};
+      GROUPS.forEach(function (g) { z[g] = zone(h.sets[g], tg[g][0], tg[g][1]); });
+      return { start: h.start, sets: h.sets, zones: z };
+    });
+    var perWeek = [];
+    for (var k = REVIEW_DAYS_WEEKS - 1; k >= 0; k--) {
+      var ws = addWeeks(start, -k);
+      perWeek.push({ start: ws, n: perWeekN[ws] || 0 });
+    }
+
+    // When sessions began: each training day's earliest real time.
+    var from = addWeeks(start, -(REVIEW_WEEKS - 1)), firstAt = dict();
+    list.forEach(function (e) {
+      var ts = timeOf(e);
+      if (!(ts >= from && ts < until) || !isTraining(e) || chosenTime(ts)) return;
+      var key = dateStr(ts);
+      if (!firstAt[key] || ts < firstAt[key]) firstAt[key] = ts;
+    });
+    var when = [];
+    for (var wd = 0; wd < 7; wd++) when.push(DAY_PARTS.map(function () { return 0; }));
+    Object.keys(firstAt).forEach(function (key) {
+      var ts = firstAt[key], wday = (new Date(ts).getDay() + 6) % 7;
+      when[wday][dayPart(ts)]++;
+    });
+
+    var recs = records(idx).filter(function (r) { return r.ts >= start && r.ts < until; });
+    var strong = {};
+    GROUPS.forEach(function (g) { strong[g] = strength(idx, g, at, REVIEW_WEEKS, list); });
+    var main = [], lf = lifts(idx, at);
+    GROUPS.forEach(function (g) { if (lf[g].length) main.push({ exId: lf[g][0].exId, group: g, days: lf[g][0].days }); });
+    main.sort(function (a, b) { return (b.days - a.days) || (GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group)); });
+
+    var series = weighSeries(list), body = null;
+    var upTo = series.filter(function (w) { return w.ts < until; });
+    if (upTo.length) {
+      var lw = upTo[upTo.length - 1], prior = upTo.filter(function (w) { return w.ts < start; });
+      body = { kg: lw.kg, ts: lw.ts, change: lw.ts >= start && prior.length ? Math.round((lw.kg - prior[prior.length - 1].kg) * 10) / 10 : null };
+    }
+
+    // What to look at next.
+    var notes = [], trained = (perWeekN[start] || 0) > 0;
+    if (!current && trained) {
+      groups.filter(function (r) { return r.sets < r.lo; })
+        .sort(function (a, b) { return (a.sets / a.lo - b.sets / b.lo) || (GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group)); })
+        .slice(0, 2).forEach(function (r) { notes.push({ kind: "low", group: r.group, sets: r.sets, lo: r.lo, hi: r.hi, twice: r.prev < r.lo }); });
+    }
+    var stalls = [];
+    Object.keys(idx.byEx).forEach(function (exId) {
+      var ex = exRec(exId);
+      if (!ex || ex.del || ex.retired || fixedTime(ex)) return;
+      var ds = idx.byEx[exId].days.filter(function (d) { return d.ts < until; });
+      if (ds.length < STALL_SESSIONS + 1) return;
+      var tail = ds.slice(-(STALL_SESSIONS + 1)), lastDay = tail[tail.length - 1];
+      // Still being done (in this week or the two before), with no long break between.
+      if (lastDay.ts < addWeeks(start, -2)) return;
+      for (var j = 1; j < tail.length; j++) {
+        if (dayDelta(tail[j - 1].ts, tail[j].ts) > RETURN_DAYS || compareDays(ex, tail[j], tail[j - 1]) > 0) return;
+      }
+      stalls.push({ kind: "stall", exId: exId, kg: lastDay.top.kg, reps: lastDay.at.slice(), ts: lastDay.ts });
+    });
+    stalls.sort(function (a, b) { return (b.ts - a.ts) || cmpStr(a.exId, b.exId); });
+    stalls.slice(0, 2).forEach(function (n) { delete n.ts; notes.push(n); });
+    if (!current && trained) {
+      var high = groups.filter(function (r) { return r.sets > r.hi; })
+        .sort(function (a, b) { return (b.sets / b.hi - a.sets / a.hi) || (GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group)); })[0];
+      if (high) notes.push({ kind: "high", group: high.group, sets: high.sets, hi: high.hi });
+    }
+    var lt = lastTrainedAll(list, at), gap = null;
+    GROUPS.forEach(function (g) {
+      if (!(lt[g] > 0)) return;
+      var dd = dayDelta(lt[g], at);
+      if (dd > REVIEW_GAP_DAYS && (!gap || dd > gap.days)) gap = { kind: "gap", group: g, days: dd };
+    });
+    if (gap) notes.push(gap);
+    if (upTo.length) {
+      var since = dayDelta(upTo[upTo.length - 1].ts, at);
+      if (since >= REVIEW_WEIGH_DAYS) notes.push({ kind: "weigh", days: since });
+    }
+    if (!current && !trained) notes.unshift({ kind: "empty" });
+    if (!current && trained && !notes.length && groups.every(function (r) { return r.sets >= r.lo; })) notes.push({ kind: "good" });
+
+    return {
+      start: start, end: end, current: current,
+      workouts: perWeekN[start] || 0, workoutsAvg: avg(function (w) { return perWeekN[w] || 0; }),
+      sets: quarter(total), setsAvg: avg(weekSets),
+      groups: groups, history: history, perWeek: perWeek, streak: weekStreak(list, at), when: when,
+      records: recs, progress: progress(idx, at), strength: strong, lifts: main.slice(0, 3),
+      body: body, notes: notes.slice(0, 4)
+    };
+  }
+
   /* ---------- Body weight ---------- */
 
   // What a weigh-in can hold (model.js, sanitizeBody).
@@ -2756,6 +2953,13 @@ var TRAINING = (function () {
     PLAN_LOOKBACK: PLAN_LOOKBACK,
     PLAN_SESSIONS: PLAN_SESSIONS,
     bodyWeight: bodyWeight,
+    weekReport: weekReport,
+    REVIEW_WEEKS: REVIEW_WEEKS,
+    REVIEW_DAYS_WEEKS: REVIEW_DAYS_WEEKS,
+    REVIEW_GAP_DAYS: REVIEW_GAP_DAYS,
+    STALL_SESSIONS: STALL_SESSIONS,
+    REVIEW_WEIGH_DAYS: REVIEW_WEIGH_DAYS,
+    DAY_PARTS: DAY_PARTS,
     chartScale: chartScale,
     lastTrainedAll: lastTrainedAll,
     RECORD_DAYS: RECORD_DAYS,

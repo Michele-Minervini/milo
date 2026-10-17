@@ -24,7 +24,7 @@
 (function () {
   "use strict";
 
-  var BUILD = "milo-v33";
+  var BUILD = "milo-v34";
   var UPDATE_TRIES_KEY = "bigsix.updateTries";   // must be set before the check below uses it
 
   // Every file carries the same build stamp. If they disagree, the browser has
@@ -1252,7 +1252,7 @@
                       once. A device with nothing on it at its first launch
                       is given NEWS straight away and never sees it.
        milo.come      "done" once "Coming from another device?" is answered. */
-  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v33";
+  var WHATSNEW_KEY = "milo.whatsnew", COME_KEY = "milo.come", NEWS = "v34";
   // Dismissed in this page view: holds even where the flag can't be stored.
   var newsSeen = false;
   function flag(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
@@ -1289,6 +1289,7 @@
     if (fresh && flag(COME_KEY) !== "done") parts.push(comeCardHTML());
     if (!fresh) parts.push(todayNudgeHTML(ws, now));
     parts.push(gymPlan() ? planCardHTML() : (routineOn() ? sessionCardHTML() : setupCardHTML()));
+    if (!fresh) parts.push(reportLineHTML(now));
     if (!fresh) parts.push(weighLineHTML(now));
     if (!newsSeen && flag(WHATSNEW_KEY) !== NEWS && !fresh) parts.push(whatsNewLineHTML());
     parts.push(state.log.some(isTraining) ? weekCardHTML(ws, now) : weekEmptyHTML());
@@ -1490,7 +1491,7 @@
   function whatsNewLineHTML() {
     return '<div class="today-card wnline">' +
       '<button class="wn-open" id="whatsNewBtn" type="button">' + ico("&#10024;") +
-      '<span class="wn-text"><b>Your own circuit, on every device.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<span class="wn-text"><b>Your week in review.</b> See what&#8217;s new</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
       '<button class="nc-x" id="whatsNewX" type="button" aria-label="Hide what&#8217;s new">&#10005;</button></div>';
   }
 
@@ -1597,6 +1598,8 @@
     on("#whatsNewBtn", function () { pushView({ t: "whatsnew" }); });
     on("#whatsNewX", function () { newsSeen = true; setFlag(WHATSNEW_KEY, NEWS); renderToday(); restoreFocus(null, ""); });
     on("#weighLine", function () { openWeigh(); });
+    on("#reportLine", function () { openReport(); });
+    on("#reportLineX", function () { setFlag(REPORT_SEEN_KEY, lastWeekKey(nowMs())); renderToday(); restoreFocus(null, ""); });
     on("#comeSyncBtn", function () { openSettingsAt("#pairCode", true); });
     on("#comeRestoreBtn", function () { openSettingsAt("#restoreBtn", true); });
     on("#comeNoBtn", function () { setFlag(COME_KEY, "done"); renderToday(); });
@@ -1606,6 +1609,292 @@
     host.querySelectorAll("[data-day]").forEach(function (b) {
       b.addEventListener("click", function () { openDay(b.getAttribute("data-day")); });
     });
+  }
+
+  /* ---------- The week in review ----------
+
+     Monday to Sunday at a glance, worked out on this device from the log
+     (TRAINING.weekReport): the numbers, what to look at next, and charts of
+     volume, progress, habits and body weight. From Monday Today offers last
+     week's; History opens it any time, and it steps back week by week.
+     Nothing is stored but which week's line was seen (per device). */
+
+  var REPORT_SEEN_KEY = "milo.reportSeen";
+  var DAY_PART_NAMES = ["Morning", "Afternoon", "Evening", "Night"];
+  var WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  // The week the review opens on: last week, the last whole one.
+  function lastWeekKey(now) { return dateStr(TRAINING.addWeeks(now, -1)); }
+  function openReport(key) {
+    var k = key || lastWeekKey(nowMs());
+    setFlag(REPORT_SEEN_KEY, k);
+    pushView({ t: "report", x: k });
+    renderToday();
+  }
+  // Today's line, Monday to Sunday, for last week, once it has training in
+  // it and until it is opened or put away.
+  function reportLineHTML(now) {
+    var key = lastWeekKey(now), from = dateFromKey(key), to = TRAINING.addWeeks(from, 1);
+    if (flag(REPORT_SEEN_KEY) === key) return "";
+    if (!state.log.some(function (e) { return MODEL.isTraining(e) && e.ts >= from && e.ts < to; })) return "";
+    return '<div class="today-card wnline"><button class="wn-open" id="reportLine" type="button">' + ico("&#128202;") +
+      '<span class="wn-text"><b>Your week in review</b> &middot; ' + esc(TRAINING.weekLabel(from)) + '</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+      '<button class="nc-x" id="reportLineX" type="button" aria-label="Put away the week in review">&#10005;</button></div>';
+  }
+
+  // A number against the weeks before: "+1.5 on your average", "same as…".
+  function vsAvg(v, avg, unit) {
+    if (avg === null) return "your first weeks";
+    var d = Math.round((v - avg) * 10) / 10;
+    if (d === 0) return "as your average";
+    return (d > 0 ? "+" : "−") + Math.abs(d) + (unit ? " " + unit : "") + " on your average";
+  }
+  function reportTile(value, label, sub) {
+    return '<div class="rv-tile"><span class="rv-val">' + value + '</span><span class="rv-lab">' + label + '</span><span class="rv-sub">' + sub + "</span></div>";
+  }
+
+  // The notes, in words.
+  function reportNoteHTML(n) {
+    var g = n.group ? "<b>" + esc(groupName(n.group)) + ":</b> " : "", text = "", icon = "&#8226;";
+    switch (n.kind) {
+      case "low":
+        icon = "&#65291;";
+        text = g + fmtSets(n.sets) + " of " + n.lo + "&#8211;" + n.hi + " hard sets" + (n.twice ? ", under target two weeks running" : "") +
+          ". About " + fmtSets(Math.ceil(n.lo - n.sets)) + " more next week: one more exercise, or a set more on a few.";
+        break;
+      case "stall":
+        var ex = TRAINING.exercise(n.exId);
+        icon = "&#8635;";
+        text = "<b>" + esc(exName(n.exId)) + ":</b> no step up in its last " + TRAINING.STALL_SESSIONS + " sessions (" + esc(bandText(ex, n.kg, n.reps)) + "). " +
+          "Next time one more rep where you can; still stuck, go about 10% lighter for a week and build back up.";
+        break;
+      case "high":
+        icon = "&#8722;";
+        text = g + fmtSets(n.sets) + " hard sets, past the top of " + n.hi + ". Fine if you recover well; if it drags, a set or two fewer.";
+        break;
+      case "gap": text = g + "not trained for " + n.days + " days."; break;
+      case "weigh": text = "No weigh-in for " + n.days + " days: <b>&#65291; Log &#8594; Weigh-in</b> keeps the body weight line going."; break;
+      case "empty": text = "No training logged this week."; break;
+      case "good": icon = "&#10003;"; text = "Every muscle group on target. Keep it going."; break;
+      default: return "";
+    }
+    return '<li class="rv-note ' + n.kind + '"' + (n.group ? ' style="--area:' + groupColorVar(n.group) + '"' : "") + '><span class="rv-ni" aria-hidden="true">' + icon + "</span><span>" + text + "</span></li>";
+  }
+
+  // Volume: a row per group, the week's sets against the target band.
+  function reportBarsHTML(r) {
+    return '<div class="rv-bars">' + r.groups.map(function (x) {
+      var max = Math.max(x.hi * 1.25, x.sets, 1);
+      var pc = function (v) { return Math.min(100, v / max * 100).toFixed(1) + "%"; };
+      var d = x.sets - x.prev;
+      return '<div class="rv-row" style="--area:' + groupColorVar(x.group) + '">' +
+        '<span class="rv-gname">' + esc(groupName(x.group)) + "</span>" +
+        '<span class="rv-track" aria-hidden="true"><span class="rv-band" style="left:' + pc(x.lo) + ";width:calc(" + pc(x.hi) + " - " + pc(x.lo) + ')"></span>' +
+        '<span class="rv-fill" style="width:' + pc(x.sets) + '"></span></span>' +
+        '<span class="rv-num"><b>' + esc(fmtSets(x.sets)) + "</b>/" + x.lo + "&#8211;" + x.hi + "</span>" +
+        '<span class="rv-meta">' + (x.days === 1 ? "1 day" : x.days + " days") + " &middot; " +
+        (d === 0 ? "same as the week before" : (d > 0 ? "+" : "−") + esc(fmtSets(Math.abs(d))) + " on the week before") + "</span></div>";
+    }).join("") + "</div>";
+  }
+
+  // The last weeks, group by group: each cell a week, filled by how far
+  // its sets got towards the target (one hue per row: the group's).
+  var ZONE_WORD = { none: "none", low: "under half the target", building: "under the target", on: "on target", above: "past the top" };
+  function reportGridHTML(r) {
+    var weeks = r.history, last = weeks.length - 1;
+    var head = '<div class="rv-grow rv-ghead"><span class="rv-gname"></span>' + weeks.map(function (w, i) {
+      var d = new Date(w.start);
+      return '<span class="rv-cell">' + (i === last ? (r.current ? "now" : "&#9679;") : (i % 3 === 0 ? d.getDate() + "/" + (d.getMonth() + 1) : "")) + "</span>";
+    }).join("") + "</div>";
+    var tg = TRAINING.targets(state.settings.vol);
+    var rows = MODEL.GROUPS.map(function (g) {
+      return '<div class="rv-grow" style="--area:' + groupColorVar(g) + '"><span class="rv-gname">' + esc(groupName(g)) + "</span>" + weeks.map(function (w) {
+        var z = w.zones[g];
+        return '<span class="rv-cell z-' + z + '" title="' + esc(groupName(g) + ", week of " + shortDay(w.start) + ": " + setsWord(w.sets[g]) + " (" + ZONE_WORD[z] + ")") + '"></span>';
+      }).join("") + "</div>";
+    }).join("");
+    var table = '<table class="visually-hidden"><caption>Hard sets per muscle group, last ' + weeks.length + " weeks</caption><tr><th>Week of</th>" +
+      MODEL.GROUPS.map(function (g) { return "<th>" + esc(groupName(g)) + " (" + tg[g][0] + "&#8211;" + tg[g][1] + ")</th>"; }).join("") + "</tr>" +
+      weeks.map(function (w) { return "<tr><td>" + esc(shortDay(w.start)) + "</td>" + MODEL.GROUPS.map(function (g) { return "<td>" + esc(fmtSets(w.sets[g])) + "</td>"; }).join("") + "</tr>"; }).join("") + "</table>";
+    return '<div class="rv-grid" aria-hidden="true">' + head + rows + "</div>" + table +
+      '<div class="legend lc-legend rv-legend" aria-hidden="true"><span><i class="rv-key z-low"></i>Under half</span><span><i class="rv-key z-building"></i>Under target</span>' +
+      '<span><i class="rv-key z-on"></i>On target</span><span><i class="rv-key z-above"></i>Past the top</span><span><i class="rv-key z-none"></i>None</span></div>';
+  }
+
+  // A small line: a strength index or a week's count, no axes.
+  function sparkSVG(vals, label) {
+    if (vals.length < 2) return "";
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    if (hi - lo < 2) { lo -= 1; hi += 1; }
+    var W = 120, H = 36, P = 3;
+    var pts = vals.map(function (v, i) {
+      return (P + (W - 2 * P) * i / (vals.length - 1)).toFixed(1) + "," + (H - P - (H - 2 * P) * (v - lo) / (hi - lo)).toFixed(1);
+    });
+    var lastPt = pts[pts.length - 1].split(",");
+    return '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(label) + '"><polyline class="sp-line" points="' + pts.join(" ") + '"/>' +
+      '<circle class="sp-end" cx="' + lastPt[0] + '" cy="' + lastPt[1] + '" r="3"/></svg>';
+  }
+
+  function reportStrengthHTML(r) {
+    var cards = MODEL.GROUPS.map(function (g) {
+      var all = r.strength[g], first = -1;
+      all.forEach(function (w, i) { if (first === -1 && w.n > 0) first = i; });
+      var weeks = first === -1 ? [] : all.slice(first);
+      var vals = [100].concat(weeks.map(function (w) { return w.index; }));
+      var total = weeks.length ? weeks[weeks.length - 1].index - 100 : 0;
+      var enough = weeks.filter(function (w) { return w.n > 0; }).length >= 2;
+      return '<div class="rv-spark" style="--area:' + groupColorVar(g) + '"><span class="rv-sname">' + esc(groupName(g)) + "</span>" +
+        (enough ? '<span class="rv-spct">' + esc(pctText(total)) + "</span>" + sparkSVG(vals, "Strength for " + groupName(g) + ": " + pctText(total) + " over " + weeks.length + " weeks")
+          : '<span class="rv-sempty">Not enough to compare yet</span>') + "</div>";
+    }).join("");
+    return '<div class="rv-sparks">' + cards + "</div>" +
+      '<p class="lc-cap">Each group from 100: the exercises you repeated, each against its own last session (estimated 1-rep max for weights, reps for the rest), over the last ' + TRAINING.REVIEW_WEEKS + " weeks.</p>";
+  }
+
+  // A main lift's chart, up to the end of the week.
+  function reportLiftHTML(r, l) {
+    var ex = TRAINING.exercise(l.exId);
+    if (!ex) return "";
+    var tr = TRAINING.trend(gym(), l.exId, 52, state.log), pts = tr.points.filter(function (p) { return p.ts < r.end; }).slice(-26);
+    if (pts.length < 2) return "";
+    var est = tr.kind === "e1rm" || tr.kind === "body", weight = tr.kind !== "reps" && tr.kind !== "secs";
+    var num = function (v) { return est ? Math.round(v * 2) / 2 : v; };
+    var amount = function (v) { return weight ? fmtW(num(v)) + " kg" : (tr.kind === "secs" ? v + " sec" : v + " reps"); };
+    var lo = Infinity, hi = -Infinity;
+    var points = pts.map(function (p, i) {
+      lo = Math.min(lo, p.value); hi = Math.max(hi, p.value);
+      return { x: i / (pts.length - 1), v: p.value, big: p.record, tip: shortDay(p.ts) + ": " + amount(p.value) };
+    });
+    var a = pts[0], b = pts[pts.length - 1];
+    var title = tr.kind === "kg" ? (ex.load === "added" ? "top added weight" : "top weight") : (CHART_NAME[tr.kind] || "").toLowerCase();
+    return '<p class="rv-lift"><b>' + esc(ex.name) + "</b> &middot; " + esc(title) + "</p>" +
+      '<div class="lc" style="--area:' + groupColorVar(l.group) + '">' + lineChartSVG(points, {
+        scale: TRAINING.chartScale(lo, hi, weight ? Math.max(4, 0.15 * hi) : 4),
+        left: dayMon(a.ts), right: dayMon(b.ts), end: weight ? fmtW(num(b.value)) : String(b.value), h: 124,
+        aria: ex.name + ", " + title + ", last " + pts.length + " sessions: from " + amount(a.value) + " to " + amount(b.value) + "."
+      }) + "</div>";
+  }
+
+  // Training days a week: one bar a week.
+  function reportDaysSVG(r) {
+    var weeks = r.perWeek, max = Math.max(4, Math.max.apply(null, weeks.map(function (w) { return w.n; })));
+    var W = 300, L = 20, B = 96, TOPY = 12, slot = (W - L) / weeks.length, bw = Math.max(4, slot - 3);
+    var y = function (v) { return B - (B - TOPY) * v / max; };
+    var s = "";
+    for (var t = 0; t <= max; t += 2) {
+      s += '<line class="grid" x1="' + L + '" x2="' + W + '" y1="' + y(t).toFixed(1) + '" y2="' + y(t).toFixed(1) + '"/>' +
+        '<text class="tick" x="' + (L - 5) + '" y="' + (y(t) + 4).toFixed(1) + '" text-anchor="end">' + t + "</text>";
+    }
+    weeks.forEach(function (w, i) {
+      var x = L + slot * i + (slot - bw) / 2, now = i === weeks.length - 1;
+      if (w.n > 0) {
+        var top = y(w.n), rr = Math.min(3, B - top);
+        s += '<path class="bar' + (now && r.current ? " now" : "") + (now ? " this" : "") + '" d="M' + x.toFixed(1) + "," + B + " V" + (top + rr).toFixed(1) +
+          " Q" + x.toFixed(1) + "," + top.toFixed(1) + " " + (x + rr).toFixed(1) + "," + top.toFixed(1) +
+          " H" + (x + bw - rr).toFixed(1) + " Q" + (x + bw).toFixed(1) + "," + top.toFixed(1) + " " + (x + bw).toFixed(1) + "," + (top + rr).toFixed(1) +
+          " V" + B + ' Z"><title>Week of ' + esc(shortDay(w.start)) + ": " + w.n + (w.n === 1 ? " training day" : " training days") + "</title></path>";
+      }
+    });
+    var d0 = new Date(weeks[0].start);
+    s += '<line class="base" x1="' + L + '" y1="' + B + '" x2="' + W + '" y2="' + B + '"/>' +
+      '<text class="tick" x="' + L + '" y="' + (B + 16) + '" text-anchor="start">' + d0.getDate() + " " + MON_SHORT[d0.getMonth()] + "</text>" +
+      '<text class="tick" x="' + W + '" y="' + (B + 16) + '" text-anchor="end">' + (r.current ? "this week" : "that week") + "</text>";
+    return '<div class="wk8 rv-days" style="--area:var(--accent)"><svg viewBox="0 0 ' + W + ' 118" role="img" aria-label="' +
+      esc("Training days in each of the last " + weeks.length + " weeks: " + weeks.map(function (w) { return w.n; }).join(", ")) + '">' + s + "</svg></div>";
+  }
+
+  // When sessions began: weekdays down, parts of the day across, a dot as
+  // big as how often.
+  function reportWhenHTML(r) {
+    var max = 0, best = null;
+    r.when.forEach(function (row, d) { row.forEach(function (n, p) { if (n > max) { max = n; best = [d, p]; } }); });
+    if (!max) return '<p class="empty-line">Sessions logged afterwards for an earlier day don&#8217;t say when they were done, so there is nothing to show yet.</p>';
+    var head = '<div class="rv-wrow rv-whead"><span></span>' + DAY_PART_NAMES.map(function (n) { return "<span>" + n + "</span>"; }).join("") + "</div>";
+    var rows = r.when.map(function (row, d) {
+      return '<div class="rv-wrow"><span class="rv-wday">' + WEEKDAY_SHORT[d] + "</span>" + row.map(function (n, p) {
+        var size = n ? Math.round(8 + 18 * Math.sqrt(n / max)) : 4;
+        return '<span class="rv-wcell"><i class="' + (n ? "on" : "") + '" style="width:' + size + "px;height:" + size + 'px" title="' +
+          esc(WEEKDAY_SHORT[d] + " " + DAY_PART_NAMES[p].toLowerCase() + ": " + n + (n === 1 ? " session" : " sessions")) + '"></i></span>';
+      }).join("") + "</div>";
+    }).join("");
+    var long = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    return '<div class="rv-when" role="img" aria-label="' + esc("When your sessions began over the last " + TRAINING.REVIEW_WEEKS + " weeks. Most often " + long[best[0]] + " " + DAY_PART_NAMES[best[1]].toLowerCase() + ".") + '">' +
+      head + rows + "</div>" +
+      '<p class="lc-cap">Most often: ' + long[best[0]] + " " + DAY_PART_NAMES[best[1]].toLowerCase() + ", over the last " + TRAINING.REVIEW_WEEKS + " weeks. Morning is from 5, afternoon from 12, evening from 17, night from 22.</p>";
+  }
+
+  function reportBodyHTML(r) {
+    if (!r.body) return '<p class="empty-line">No weigh-ins yet. <b>&#65291; Log &#8594; Weigh-in</b>, once a week.</p>';
+    var from = TRAINING.addWeeks(r.start, -(TRAINING.REVIEW_WEEKS - 1));
+    var ws = state.log.filter(function (e) { return isWeighIn(e) && e.ts >= from && e.ts < r.end; }).sort(function (a, b) { return a.ts - b.ts; });
+    var line = "";
+    if (ws.length >= 2) {
+      var span = Math.max(1, dayDelta(from, r.end - 1)), lo = Infinity, hi = -Infinity;
+      var pts = ws.map(function (e) { lo = Math.min(lo, e.kg); hi = Math.max(hi, e.kg); return { x: dayDelta(from, e.ts) / span, v: e.kg, tip: shortDay(e.ts) + ": " + fmtKg(e.kg) + " kg" }; });
+      line = '<div class="lc" style="--area:var(--accent)">' + lineChartSVG(pts, {
+        scale: TRAINING.chartScale(lo, hi, 4), left: dayMon(from), right: dayMon(r.end - 1), h: 124,
+        aria: "Body weight over the last " + TRAINING.REVIEW_WEEKS + " weeks: from " + fmtKg(ws[0].kg) + " kg to " + fmtKg(ws[ws.length - 1].kg) + " kg."
+      }) + "</div>";
+    }
+    return '<p class="rv-bodyline"><b>' + esc(fmtKg(r.body.kg)) + " kg</b> on " + esc(shortDay(r.body.ts)) +
+      (r.body.change !== null ? " &middot; " + (r.body.change === 0 ? "same as the weigh-in before" : (r.body.change > 0 ? "+" : "−") + esc(fmtKg(Math.abs(r.body.change))) + " kg on the one before") : "") + "</p>" + line;
+  }
+
+  function reportPaneHTML(key) {
+    var now = nowMs(), r = TRAINING.weekReport(state.log, dateFromKey(key), state.settings.vol, now, gym());
+    if (!r) return "";
+    var thisWeek = r.current, canNext = !thisWeek;
+    var recs = r.records.map(function (x) {
+      var ex = TRAINING.exercise(x.exId);
+      return '<li><span class="rv-ni" aria-hidden="true">' + TROPHY + "</span><span><b>" + esc(exName(x.exId)) + "</b> &middot; " + esc(oneSet(ex, x.kg, x.reps)) + " &middot; " + esc(shortDay(x.ts)) + "</span></li>";
+    }).join("");
+    var prog = MODEL.GROUPS.map(function (g) {
+      var p = r.progress[g], n = p.up + p.same + p.down;
+      if (!n) return "";
+      var bits = [];
+      if (p.up) bits.push(p.up + " up");
+      if (p.same) bits.push(p.same + " the same");
+      if (p.down) bits.push(p.down + " down");
+      return '<div class="rv-prow" style="--area:' + groupColorVar(g) + '"><span class="rv-gname">' + esc(groupName(g)) + "</span><span>" + bits.join(" &middot; ") + "</span></div>";
+    }).join("");
+    var lifts = r.lifts.map(function (l) { return reportLiftHTML(r, l); }).join("");
+    var avgDays = r.perWeek.filter(function (w) { return w.n > 0; }).length;
+    return sheetHead({ title: "&#128202; Week in review", sub: esc(TRAINING.weekLabel(r.start)) + (thisWeek ? " &middot; so far" : "") }) +
+      '<div class="sheet-body volinfo report">' +
+      '<div class="rv-nav"><button type="button" class="btn" id="rvPrev">&#8249; Week before</button>' +
+      (canNext ? '<button type="button" class="btn" id="rvNext">' + (r.end > TRAINING.addWeeks(now, -1) ? "This week" : "Week after") + " &#8250;</button>" : "") + "</div>" +
+      '<div class="rv-tiles">' +
+      // A week under way isn't set against whole weeks.
+      reportTile(String(r.workouts), r.workouts === 1 ? "training day" : "training days", thisWeek ? "so far this week" : esc(vsAvg(r.workouts, r.workoutsAvg, ""))) +
+      reportTile(esc(fmtSets(r.sets)), "hard sets", thisWeek ? "so far this week" : esc(vsAvg(r.sets, r.setsAvg, ""))) +
+      reportTile(String(r.records.length), r.records.length === 1 ? "record" : "records", r.streak ? "streak: " + r.streak + (r.streak === 1 ? " week" : " weeks") : "no streak yet") +
+      reportTile(r.body ? esc(fmtKg(r.body.kg)) : "&#8212;", "kg body weight", r.body ? (r.body.change !== null ? (r.body.change > 0 ? "+" : (r.body.change < 0 ? "−" : "")) + esc(fmtKg(Math.abs(r.body.change))) + " kg on the one before" : "latest weigh-in") : "no weigh-in") +
+      "</div>" +
+      (r.notes.length ? "<h4>" + (thisWeek ? "Worth a look" : "For next week") + '</h4><ul class="rv-notes">' + r.notes.map(reportNoteHTML).join("") + "</ul>" : "") +
+      "<h4>Volume</h4>" + reportBarsHTML(r) +
+      '<p class="lc-cap">Hard sets against your target (the shaded band); days with a hard set for the group, and the change on the week before.</p>' +
+      "<h4>The last " + r.history.length + " weeks</h4>" + reportGridHTML(r) +
+      "<h4>Progress</h4>" +
+      (recs ? '<ul class="rv-notes rv-recs">' + recs + "</ul>" : "") +
+      (prog ? '<div class="rv-prog">' + prog + "</div>" + '<p class="lc-cap">Gym exercises against their last session before this week: a heavier top weight, or more reps at the same.</p>' : "") +
+      reportStrengthHTML(r) + lifts +
+      "<h4>Habits</h4>" + reportDaysSVG(r) +
+      '<p class="lc-cap">Training days a week' + (avgDays ? ", " + (Math.round(r.perWeek.reduce(function (s2, w) { return s2 + w.n; }, 0) / avgDays * 10) / 10) + " on average in the weeks you trained" : "") +
+      ". Streak: " + r.streak + (r.streak === 1 ? " week" : " weeks") + " in a row with " + TRAINING.STREAK_WORKOUTS + " or more.</p>" +
+      "<h5>When you train</h5>" + reportWhenHTML(r) +
+      "<h4>Body weight</h4>" + reportBodyHTML(r) +
+      "</div>";
+  }
+  function wireReport(sheet, key) {
+    var step = function (n) {
+      var top = uiStack[uiStack.length - 1];
+      if (!top || top.t !== "report") return;
+      top.x = dateStr(TRAINING.addWeeks(dateFromKey(key), n));
+      renderSheet();
+      focusIn($("#sheet"), n < 0 ? "#rvPrev" : ($("#rvNext") ? "#rvNext" : "#rvPrev"));
+    };
+    var prev = $("#rvPrev", sheet), next = $("#rvNext", sheet);
+    if (prev) prev.addEventListener("click", function () { step(-1); });
+    if (next) next.addEventListener("click", function () { step(1); });
   }
 
   /* ---------- Body: this week's six muscle groups ---------- */
@@ -2843,7 +3132,9 @@
     var chip = function (k, label) {
       return '<button class="chip' + (historyView.filter === k ? " sel" : "") + '" type="button" data-filter="' + k + '" aria-pressed="' + (historyView.filter === k) + '">' + label + "</button>";
     };
-    host.innerHTML = stats + recLine + calendarHTML(now) +
+    var reviewLine = state.log.some(MODEL.isTraining) ? '<div class="today-card wnline"><button class="wn-open" id="reportBtn" type="button">' + ico("&#128202;") +
+      '<span class="wn-text"><b>Week in review</b> &middot; volume, progress, habits, body weight</span><span class="chev" aria-hidden="true">&#8250;</span></button></div>' : "";
+    host.innerHTML = stats + recLine + reviewLine + calendarHTML(now) +
       '<div class="hfilter"><h3 class="sect">By day</h3>' +
       (any ? '<div class="chips" role="group" aria-label="Show" style="--area:var(--accent)">' + chip("all", "All") + chip("gym", "Gym") + chip("bw", "Bodyweight") + "</div>" : "") +
       "</div>" + list;
@@ -2854,6 +3145,7 @@
     on("#calNext", function () { historyView.month = TRAINING.addMonths(historyView.month || now, 1); renderHistory(); focusIn(host, "#calNext"); });
     on("#showEarlierBtn", function () { historyView.weeks += 2; renderHistory(); focusIn(host, $("#showEarlierBtn", host) ? "#showEarlierBtn" : "#hlist .hopen"); });
     on("#recordsBtn", openRecords);
+    on("#reportBtn", function () { openReport(); });
     host.querySelectorAll("[data-filter]").forEach(function (b) {
       b.addEventListener("click", function () {
         historyView.filter = b.getAttribute("data-filter");
@@ -3023,6 +3315,9 @@
   function whatsNewPaneHTML() {
     return sheetHead({ title: ico("&#10024;") + "What&#8217;s new in Milo", sub: "Once, after this update" }) +
       '<div class="sheet-body volinfo whatsnew">' +
+      "<h4>Your week in review</h4><p>Every Monday, Today offers last week at a glance: training days, hard sets, records and body weight against your average, " +
+      "what to look at next week, and charts of your volume (12 weeks, group by group), strength, training days and when you train. " +
+      "It is also in <b>History</b> any time, and steps back week by week. Worked out on your phone from your log.</p>" +
       "<h4>Your own circuit</h4><p>In any timed exercise, <b>The circuit</b> shows the exercises hands-free goes round: change their order, take one out, add any timed exercise " +
       "(the plank, the wall sit, one of your own), set each one&#8217;s seconds and the rest between sets. The circuit and its rest are now kept with your data, so every device you sync has them.</p>" +
       "<h4>Gym or Bodyweight in Settings</h4><p>The switch is also under <b>Settings &#8594; Weekly plan</b>.</p>" +
@@ -5121,6 +5416,7 @@
       case "whatsnew": return "What's new";
       case "hinfo": return "Workouts";
       case "records": return "Records";
+      case "report": return "Week in review";
       case "weigh": return "Weigh-in";
       case "weight": return "Body weight";
       case "gympick": return "Exercises";
@@ -5252,6 +5548,7 @@
     else if (view.t === "whatsnew") sheet.innerHTML = whatsNewPaneHTML();
     else if (view.t === "hinfo") sheet.innerHTML = hinfoPaneHTML();
     else if (view.t === "records") sheet.innerHTML = recordsPaneHTML();
+    else if (view.t === "report" && typeof view.x === "string" && DATE_KEY_RE.test(view.x)) sheet.innerHTML = reportPaneHTML(view.x);
     else if (view.t === "weigh" && weighDraft) sheet.innerHTML = weighPaneHTML();
     else if (view.t === "weight" && state.log.some(isWeighIn)) sheet.innerHTML = weightPaneHTML();
     else if (view.t === "gympick") sheet.innerHTML = gymPickPaneHTML();
@@ -6299,6 +6596,7 @@
     if (view.t === "gympick") wireGymPick(sheet);
     if (view.t === "gym") wireGym(sheet);
     if (view.t === "circuit") wireCircuit(sheet);
+    if (view.t === "report") wireReport(sheet, view.x);
     if (view.t === "exercise") wireExercise(sheet, view.x);
     if (view.t === "exform") wireExForm(sheet);
 

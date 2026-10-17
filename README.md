@@ -164,6 +164,16 @@ Four tabs along the bottom, with **＋ Log** in the middle of them:
   you can't hold any longer and the seconds you held are logged, then the rest
   and hands-free go on as for any set. Which exercises count up is a list in
   data.js (`GYM_TO_FAILURE`).
+- **Week in review.** From Monday, Today offers last week at a glance (and
+  History has it any time, stepping back week by week): training days, hard
+  sets, records and body weight against the average of the four weeks before;
+  up to four notes for next week (groups under or past their target, an
+  exercise with no step up in three sessions, a group not trained for over 10
+  days, a weigh-in overdue); hard sets per group against the target, a 12-week
+  grid of every group, which gym exercises went up, each group's strength over
+  12 weeks, the main lifts' charts, training days a week over 26 weeks, when
+  you train (weekday by part of the day), and body weight. All worked out on
+  the phone from the log (`TRAINING.weekReport`); nothing is stored.
 - **Body weight in pull-ups, chin-ups and dips.** Once you have weighed in,
   their chart is the estimated 1-rep max with your body in — your weight that
   day plus what you added — so sets with and without added weight sit on one
