@@ -2174,3 +2174,20 @@ p.lc-cap { margin: 6px 2px 0; font-size: 0.8rem; color: var(--muted); line-heigh
 /* ---------- Gym or bodyweight: the switch on Today's plan ---------- */
 .plancard .planmode { margin: 0 0 12px; }
 .plancard .planmode .chip { min-height: 36px; }
+
+/* ---------- The circuit: its exercises in order, their times ---------- */
+.circrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name ctrl" "acts ctrl";
+  align-items: center;
+  gap: 4px 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.circrow .vlab { grid-area: name; }
+.circrow .stepper, .circrow .secsfree { grid-area: ctrl; }
+.circrow .stepval { width: 56px; }
+.circacts { grid-area: acts; display: flex; gap: 6px; }
+.circbtn { min-height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 0.78rem; font-weight: 650; color: var(--ink-2); }
+.circadd { margin-top: 6px; }

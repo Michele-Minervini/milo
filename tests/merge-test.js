@@ -155,8 +155,8 @@ section("sync decisions (reconcile)");
   check("first device: nothing in the cloud → push", first.push && !first.changed);
   const synced = MODEL.reconcile(S(mine), { status: "ok", raw: S(mine) }, null);
   check("already in step → no write", !synced.push && !synced.changed);
-  check("cloud from a newer version → do nothing", MODEL.reconcile(S(mine), { status: "ok", raw: { v: 7, areas: {} } }, null).newer === true);
-  check("…also when the version is a string", MODEL.reconcile(S(mine), { status: "ok", raw: { v: "7", areas: {} } }, null).newer === true);
+  check("cloud from a newer version → do nothing", MODEL.reconcile(S(mine), { status: "ok", raw: { v: MODEL.MODEL_VERSION + 1, areas: {} } }, null).newer === true);
+  check("…also when the version is a string", MODEL.reconcile(S(mine), { status: "ok", raw: { v: String(MODEL.MODEL_VERSION + 1), areas: {} } }, null).newer === true);
   check("unreadable cloud copy → blocked, never overwritten", MODEL.reconcile(S(mine), { status: "unreadable" }, null).blocked === true);
   check("cloud copy that isn't a state → blocked", MODEL.reconcile(S(mine), { status: "ok", raw: { v: 5, areas: [] } }, null).blocked === true);
   check("an old record from a newer version is ignored, not fatal", !MODEL.reconcile(S(mine), { status: "absent" }, { status: "ok", raw: { v: 9, areas: {} } }).blocked);
@@ -219,7 +219,7 @@ section("another tab saved (absorb)");
   // Two tabs taking each other in must settle, not ping-pong forever.
   const settled = MODEL.absorb(r2.state, r2.state);
   check("absorbing its own result changes nothing", !settled.changed && !settled.save);
-  check("newer data from the other tab → read-only", MODEL.absorb(mine, { v: 7, areas: {} }).readOnly === true);
+  check("newer data from the other tab → read-only", MODEL.absorb(mine, { v: MODEL.MODEL_VERSION + 1, areas: {} }).readOnly === true);
 }
 
 section("merge algebra on random states (old and new formats)");

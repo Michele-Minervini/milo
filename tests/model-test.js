@@ -96,9 +96,9 @@ section("moving from data v4");
 }
 
 section("data from a newer version is refused, never stripped");
-check("isNewer: v7", M.isNewer({ v: 7, areas: {} }) && M.isNewer({ v: "7", areas: {} }));
-check("isNewer: not v6 or older", !M.isNewer({ v: 6 }) && !M.isNewer({ v: 5 }) && !M.isNewer({ v: 1 }) && !M.isNewer({}) && !M.isNewer(null));
-check("sanitizeState returns null for newer data", M.sanitizeState({ v: 7, areas: {} }) === null);
+check("isNewer: the next version, as a number or text", M.isNewer({ v: M.MODEL_VERSION + 1, areas: {} }) && M.isNewer({ v: String(M.MODEL_VERSION + 1), areas: {} }));
+check("isNewer: not the current version or older", !M.isNewer({ v: M.MODEL_VERSION }) && !M.isNewer({ v: 6 }) && !M.isNewer({ v: 5 }) && !M.isNewer({ v: 1 }) && !M.isNewer({}) && !M.isNewer(null));
+check("sanitizeState returns null for newer data", M.sanitizeState({ v: M.MODEL_VERSION + 1, areas: {} }) === null);
 
 section("gym entries");
 {
@@ -296,6 +296,37 @@ section("calendar days across daylight-saving changes (" + (process.env.TZ || "l
     if (Md.dateStr(Md.dateFromKey(key)) !== key) roundTrip = false;
   }
   check("dateFromKey inverts dateStr for every day of 2026", roundTrip);
+}
+
+section("data v7: your circuit and its rest, kept in settings");
+{
+  const J = JSON.stringify;
+  const eq = (name, got, want) => check(name, J(got) === J(want), "expected " + J(want) + "\n       got      " + J(got));
+  const base = () => ({ v: 6, areas: {}, log: [], settings: { restSeconds: 180, restGym: 50, autoRest: true, ghostBase: null, vol: [10, 20], keepAwake: false },
+    routine: { split: "off", mode: "bw", sessionIndex: 0, override: null }, pm: {}, snapshots: [], milestones: [], deleted: [], exercises: [] });
+  const v6 = S(base());
+  eq("data v6 becomes v7 with the catalogue's circuit and rest, unstamped", [v6.v, v6.settings.circuit, v6.settings.circuitRest, v6.pm.circuit, v6.pm.circuitRest], [7, null, null, 0, 0]);
+  eq("settings in this order", Object.keys(v6.settings), ["restSeconds", "restGym", "autoRest", "ghostBase", "vol", "keepAwake", "circuit", "circuitRest"]);
+  const withC = (c, r, pm) => { const b = base(); b.v = 7; b.settings.circuit = c; b.settings.circuitRest = r; b.pm = pm || {}; return S(b); };
+  eq("a circuit is kept as it is, in its order", withC(["leg_flutter", "star_crunch", "plank", "x_hollow"], 15, { circuit: 9, circuitRest: 9 }).settings, Object.assign({}, v6.settings, { circuit: ["leg_flutter", "star_crunch", "plank", "x_hollow"], circuitRest: 15 }));
+  eq("…an empty one too: a circuit you emptied stays empty", withC([], null, { circuit: 9 }).settings.circuit, []);
+  eq("ids nobody knows are kept: they are checked by format, not against the catalogue", withC(["not_yet_in_catalogue"], null).settings.circuit, ["not_yet_in_catalogue"]);
+  eq("anything else is the catalogue's circuit", [["a", "a"], ["a", 7], ["<b>"], "star_crunch", { 0: "a" }, 7, Array(13).fill(0).map((_, i) => "x" + i), [""], [null]].map(c => withC(c, null).settings.circuit),
+    [null, null, null, null, null, null, null, null, null]);
+  eq("twelve is the most", withC(Array(12).fill(0).map((_, i) => "x" + i), null).settings.circuit.length, 12);
+  eq("a rest from 5 to 300 whole seconds (rounded), else the catalogue's", [5, 300, 20.4, "45", 4, 301, -1, "x", true, null, {}].map(r => withC(null, r).settings.circuitRest),
+    [5, 300, 20, 45, null, null, null, null, null, null, null]);
+  eq("a value that isn't the default always carries a stamp", [withC(["a", "b"], null).pm.circuit, withC(null, 15).pm.circuitRest, withC(null, null).pm.circuit], [1, 1, 0]);
+  check("sanitizing is idempotent with them", J(S(withC(["a", "b"], 15, { circuit: 9, circuitRest: 9 }))) === J(withC(["a", "b"], 15, { circuit: 9, circuitRest: 9 })));
+
+  const A = withC(["leg_flutter", "bicycle"], null, { circuit: 100 }), B = withC(null, 25, { circuitRest: 200 });
+  const m1 = M.merge(A, B), m2 = M.merge(B, A);
+  eq("two devices: each change is kept, the circuit from one and the rest from the other", [m1.settings.circuit, m1.settings.circuitRest, m1.pm.circuit, m1.pm.circuitRest], [["leg_flutter", "bicycle"], 25, 100, 200]);
+  check("…in either order", J(m1) === J(m2));
+  eq("the later change of the circuit wins", M.merge(A, withC(["plank", "wall_sit"], null, { circuit: 150 })).settings.circuit, ["plank", "wall_sit"]);
+  eq("going back to the catalogue's (null) is a change like any other", M.merge(A, withC(null, null, { circuit: 150 })).settings.circuit, null);
+  const old = base(); old.pm = { restSeconds: 300 };
+  eq("data from a device still on v6 can't undo them: it doesn't carry the fields", (() => { const m = M.merge(A, Object.assign(clone(old), { v: 6 })); return [m.settings.circuit, m.pm.circuit]; })(), [["leg_flutter", "bicycle"], 100]);
 }
 
 h.done(__filename);

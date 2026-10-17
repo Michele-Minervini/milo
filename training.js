@@ -25,13 +25,14 @@
    any log (sanitized v5 entries of every kind, an empty log, or
    junk) without throwing.
 
-   ONE piece of module state: the exercises registered with
-   useExercises(state.exercises) — custom exercises and tweaks to
-   built-in ones. Every gym lookup (exercise(), and through it what a
-   gym entry counts for) reads it. The app calls useExercises()
-   whenever its state changes; until then only the built-in
-   exercises exist. Tests that register exercises must call it, and
-   call useExercises([]) when they are done.
+   ONE piece of module state: what useExercises(state.exercises,
+   state.settings.circuit) registered — custom exercises and tweaks to
+   built-in ones, and your circuit. Every gym lookup (exercise(), and
+   through it what a gym entry counts for) and every circuit question
+   reads it. The app calls useExercises() whenever its state changes;
+   until then only the built-in exercises and the catalogue's circuit
+   exist. Tests that register anything must call it, and call
+   useExercises([]) when they are done.
 
    Reads the tables in data.js (AREAS, GROUP_INFO, AREA_GROUPS,
    VARIATION_GROUPS, QUICK_GROUPS, GYM_EXERCISES, GYM_RETIRED, SPLITS,
@@ -58,7 +59,7 @@
 var TRAINING = (function () {
   "use strict";
 
-  var BUILD = "milo-v32";
+  var BUILD = "milo-v33";
 
   var GROUPS = MODEL.GROUPS;
   var startOfDay = MODEL.startOfDay;
@@ -986,6 +987,7 @@ var TRAINING = (function () {
   // the built-in ones merged with their tweaks, and your own. Replaced
   // whole by useExercises(); never changed in place.
   var resolved = dict();
+  var ownCircuit = null;      // your circuit as registered (useExercises), or null
 
   // A built-in exercise with its tweak (or null), as exercise() hands it out.
   function resolveBuiltIn(b, o) {
@@ -1018,7 +1020,10 @@ var TRAINING = (function () {
   // id listed twice the newer mts wins. A tweak for an id that isn't built
   // in is ignored. Anything that isn't a list registers nothing: only the
   // built-in exercises, untweaked.
-  function useExercises(list) {
+  // circuit: your circuit (state.settings.circuit), a list of exercise ids
+  // in order; anything else (null) leaves the catalogue's (GYM_CIRCUITS).
+  function useExercises(list, circuit) {
+    ownCircuit = Array.isArray(circuit) ? circuit.filter(function (id) { return typeof id === "string"; }) : null;
     var recs = dict();
     (Array.isArray(list) ? list : []).forEach(function (r) {
       var c = MODEL.sanitizeExercise(r);
@@ -2419,20 +2424,32 @@ var TRAINING = (function () {
   // The circuit an exercise is in (data.js, GYM_CIRCUITS): its exercises that
   // can be done now — known, timed, not removed or retired — in order. null
   // when it is in none, or would be alone in it.
-  function circuitOf(exId) {
-    var found = null;
-    if (!exRec(exId)) return null;
-    (Array.isArray(CIRCUITS) ? CIRCUITS : []).forEach(function (c) {
-      if (!found && Array.isArray(c) && c.indexOf(exId) !== -1) found = c;
-    });
-    if (!found) return null;
+  // Your circuit as one can be done now: its exercises that are known,
+  // timed, not removed or retired, none twice, in order. Your own when you
+  // have set one (useExercises), else the catalogue's first. Any length.
+  function circuitList() {
+    var raw = ownCircuit !== null ? ownCircuit : (Array.isArray(CIRCUITS) && Array.isArray(CIRCUITS[0]) ? CIRCUITS[0] : []);
     var has = dict();
-    var list = found.filter(function (id) {
+    return raw.filter(function (id) {
       var e = exRec(id);
       if (!e || has[id] || !e.timed || e.del || e.retired) return false;
       has[id] = true;
       return true;
     });
+  }
+  // Whether your circuit is your own (set and kept in settings) rather than
+  // the catalogue's.
+  function circuitOwn() { return ownCircuit !== null; }
+
+  function circuitOf(exId) {
+    if (!exRec(exId)) return null;
+    // The catalogue's other circuits, if it ever has more than one, stay as
+    // they are; yours takes the place of its first.
+    var found = null;
+    (Array.isArray(CIRCUITS) ? CIRCUITS : []).forEach(function (c, i) {
+      if (!found && (i > 0 || ownCircuit === null) && Array.isArray(c) && c.indexOf(exId) !== -1) found = c;
+    });
+    var list = found ? found.filter(function (id) { var e = exRec(id); return !!e && e.timed && !e.del && !e.retired; }) : circuitList();
     return list.length > 1 && list.indexOf(exId) !== -1 ? list : null;
   }
 
@@ -2733,6 +2750,8 @@ var TRAINING = (function () {
     bodyBest: bodyBest,
     fixedTime: function (exId) { return fixedTime(exRec(exId)); },
     circuitOf: circuitOf,
+    circuitList: circuitList,
+    circuitOwn: circuitOwn,
     circuitNext: circuitNext,
     PLAN_LOOKBACK: PLAN_LOOKBACK,
     PLAN_SESSIONS: PLAN_SESSIONS,

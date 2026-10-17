@@ -382,6 +382,30 @@ section("circuits: retired or removed exercises, your own, any order, junk");
   eq("junk alone: as if nothing was logged", N(junk, "star_crunch"), { exId: "leg_flutter", set: 1, sets: 3, circuit: true });
 }
 
+section("your own circuit (state.settings.circuit, data v7)");
+{
+  eq("before you change it: the catalogue's six", [T.circuitList(), T.circuitOwn()], [SIX, false]);
+  T.useExercises([], ["plank", "leg_flutter", "star_crunch"]);
+  eq("yours: in your order, whichever of them you ask from", [T.circuitList(), T.circuitOwn(), T.circuitOf("plank"), T.circuitOf("star_crunch")],
+    [["plank", "leg_flutter", "star_crunch"], true, ["plank", "leg_flutter", "star_crunch"], ["plank", "leg_flutter", "star_crunch"]]);
+  eq("one taken out is no longer in a circuit", T.circuitOf("bicycle"), null);
+  eq("hands-free goes round yours", [N([G(NOW - 60000, "plank", [60], 0)], "plank").exId, N([G(NOW - 60000, "star_crunch", [20], 0)], "star_crunch").exId], ["leg_flutter", "plank"]);
+  T.useExercises([], ["plank", "bench_db", "nope", "plank", "pullup_assist", 7, "wall_sit"]);
+  eq("what can't be counted down is left out: a weighted exercise, one nobody knows, a retired one, a second plank", T.circuitList(), ["plank", "wall_sit"]);
+  T.useExercises([{ id: "x_hollow", name: "Hollow hold", group: "abs", sec: [], equip: "bodyweight", load: "bw", timed: true, perHand: false, inc: 2.5, lo: 30, hi: 30, note: "", del: false, mts: 5 }], ["x_hollow", "boat_hold"]);
+  eq("one of your own can be in it", [T.circuitList(), T.circuitOf("x_hollow")], [["x_hollow", "boat_hold"], ["x_hollow", "boat_hold"]]);
+  T.useExercises([{ id: "x_hollow", name: "Hollow hold", group: "abs", sec: [], equip: "bodyweight", load: "bw", timed: true, perHand: false, inc: 2.5, lo: 30, hi: 30, note: "", del: true, mts: 6 }], ["x_hollow", "boat_hold"]);
+  eq("…until it is removed from the list", [T.circuitList(), T.circuitOf("boat_hold")], [["boat_hold"], null]);
+  T.useExercises([], ["leg_flutter"]);
+  eq("one exercise alone is no circuit: it does its own sets", [T.circuitOf("leg_flutter"), N([G(NOW - 60000, "leg_flutter", [40], 0)], "leg_flutter")], [null, { exId: "leg_flutter", set: 2, sets: 3, circuit: false }]);
+  T.useExercises([], []);
+  eq("an empty circuit is empty: the six are in none", [T.circuitList(), T.circuitOwn(), T.circuitOf("star_crunch")], [[], true, null]);
+  T.useExercises([], "junk");
+  eq("anything that isn't a list: the catalogue's again", [T.circuitList(), T.circuitOwn()], [SIX, false]);
+  T.useExercises([]);
+  eq("…and so after useExercises([])", T.circuitOwn(), false);
+}
+
 section("a set time: the abs circuit is done for 40 seconds, 20 a side");
 {
   const sug = (id, log) => { const sg = T.suggest(id, log || [], NOW); return [sg.kind, sg.sets, sg.targets]; };

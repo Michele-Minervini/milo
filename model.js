@@ -11,9 +11,9 @@
    what a sanitizer outputs changes what every device stores: run
    sh tests/run.sh, and see ROADMAP.md before touching it.
 
-   Stored shape, data v6 (keys in this order):
+   Stored shape, data v7 (keys in this order):
    {
-     v: 6,
+     v: 7,
      areas:      { [areaId]: { step 1..10, std 0..3, mts } },
      log:        entries sorted by (ts, id), one per exercise done:
                    bodyweight  { id, ts, date, areaId, step, sets, note, mts, variant }
@@ -21,7 +21,8 @@
                                  warm: [0|1 per set] | null }
                    quick       { id, ts, kind:"quick", groups:{ group: sets }, note, mts }
                    body        { id, ts, kind:"body",  kg, waist, note, mts }
-     settings:   { restSeconds, restGym, autoRest, ghostBase, vol:[lo,hi], keepAwake }
+     settings:   { restSeconds, restGym, autoRest, ghostBase, vol:[lo,hi], keepAwake,
+                   circuit: [exercise ids] | null, circuitRest: seconds | null }
      routine:    { split, mode, sessionIndex, override }
      pm:         { field: last-changed ms } for every settings/routine field
      snapshots:  [{ d, v:[6 radar values] }]
@@ -34,13 +35,16 @@
 var MODEL = (function () {
   "use strict";
 
-  var BUILD = "milo-v32";
+  var BUILD = "milo-v33";
 
   // The shape of the stored data. Any change to what the sanitizers output is a
   // change to what every device keeps: bump this, and see ROADMAP.md.
   //   6 (milo-v23): gym entries carry `warm`, the warm-up marks made by
   //     hand; the gym rest starts at 0:50 instead of 2:00.
-  var MODEL_VERSION = 6;
+  //   7 (milo-v33): settings carry `circuit` (the exercises of your circuit,
+  //     in order; null: the catalogue's) and `circuitRest` (its rest in
+  //     seconds; null: the catalogue's), both synced like any preference.
+  var MODEL_VERSION = 7;
 
   var KNOWN_IDS = AREAS.map(function (a) { return a.id; });
   var DEFAULT_REST = 180; // seconds
@@ -54,7 +58,7 @@ var MODEL = (function () {
   var GROUPS = ["chest", "back", "shoulders", "arms", "abs", "legs"];
 
   // Every preference, each merged on its own (see merge()).
-  var SETTINGS_FIELDS = ["restSeconds", "restGym", "autoRest", "ghostBase", "vol", "keepAwake"];
+  var SETTINGS_FIELDS = ["restSeconds", "restGym", "autoRest", "ghostBase", "vol", "keepAwake", "circuit", "circuitRest"];
   var ROUTINE_FIELDS = ["split", "mode", "sessionIndex", "override"];
   var PREF_FIELDS = SETTINGS_FIELDS.concat(ROUTINE_FIELDS);
 
@@ -159,7 +163,8 @@ var MODEL = (function () {
   /* ---------- Defaults ---------- */
 
   function defaultSettings() {
-    return { restSeconds: DEFAULT_REST, restGym: DEFAULT_REST_GYM, autoRest: true, ghostBase: null, vol: [10, 20], keepAwake: false };
+    return { restSeconds: DEFAULT_REST, restGym: DEFAULT_REST_GYM, autoRest: true, ghostBase: null, vol: [10, 20], keepAwake: false,
+      circuit: null, circuitRest: null };
   }
   function defaultRoutine() {
     return { split: "off", mode: "bw", sessionIndex: 0, override: null };
@@ -261,6 +266,8 @@ var MODEL = (function () {
     var vol = sanitizeVol(ss.vol);
     if (vol) out.settings.vol = vol;
     if (typeof ss.keepAwake === "boolean") out.settings.keepAwake = ss.keepAwake;
+    out.settings.circuit = sanitizeCircuit(ss.circuit);
+    out.settings.circuitRest = intIn(ss.circuitRest, 5, 300);
 
     if (legacyShape) {
       // v1–v4: { enabled, daysPerWeek, sessionIndex }. An enabled routine with
@@ -323,6 +330,22 @@ var MODEL = (function () {
     });
 
     if (Array.isArray(s.exercises)) out.exercises = sanitizeExercises(s.exercises, out.log);
+    return out;
+  }
+
+  // Your circuit: up to 12 exercise ids, none twice, in order — checked by
+  // format only, like an entry's exId, so a change to the catalogue never
+  // drops it (training.js leaves out what it doesn't know). Anything else:
+  // null, the catalogue's circuit. An empty list is kept: a circuit you
+  // emptied stays empty.
+  function sanitizeCircuit(c) {
+    if (!Array.isArray(c) || c.length > 12) return null;
+    var seen = dict(), out = [];
+    for (var i = 0; i < c.length; i++) {
+      if (typeof c[i] !== "string" || !ID_RE.test(c[i]) || seen[c[i]]) return null;
+      seen[c[i]] = true;
+      out.push(c[i]);
+    }
     return out;
   }
 
